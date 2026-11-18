@@ -91,6 +91,7 @@ Not affiliated with SoundCloud. The icon is a plain cloud, not SoundCloud's logo
 
 ## Status
 
-1.1.0 has been verified on desktop Chrome only (playback past 5 s, five track switches in a row,
-debounced skips, queue-end autoplay). It has not yet run on the TV: the MediaSource path there is
-unproven. Run the debug package's self-test in stages (see `js/selftest.js`) before trusting it.
+1.1.0 runs on an LG 75UM7600PLB (webOS TV Lite 4.10.2, Chrome 53). The debug self-test passed on the
+TV: playback past 5 s at `aac_160k` through MediaSource, five track switches in a row, debounced
+skips, an `aac_96k` track, and autoplay of related tracks when the queue ends, with no faults in the
+kernel log. Layout and focus were checked from a captured frame, not yet by long use on the couch.

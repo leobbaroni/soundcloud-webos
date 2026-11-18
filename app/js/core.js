@@ -40,8 +40,13 @@
     if (debugOn && debugHost) {
       var msg = (seq++) + " +" + ((Date.now() - t0) / 1000).toFixed(1) + "s " + line;
       if (msg.length > 1500) msg = msg.slice(0, 1500) + "...";
-      var img = new Image();
-      img.src = debugHost.replace(/\/$/, "") + "/probe?" + encodeURIComponent(msg);
+      // a title cut in the middle of an emoji leaves half a surrogate pair, which
+      // encodeURIComponent refuses: logging must never throw into the app
+      msg = msg.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(^|[^\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "$1?");
+      try {
+        var img = new Image();
+        img.src = debugHost.replace(/\/$/, "") + "/probe?" + encodeURIComponent(msg);
+      } catch (e) {}
     }
   };
   window.onerror = function (msg, src, line, col, err) {
