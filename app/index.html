@@ -1,26 +1,63 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <title>SoundCloud</title>
-<style>
-  html, body { margin: 0; height: 100%; background: #111; color: #eee; font: 32px sans-serif; }
-  body { display: flex; align-items: center; justify-content: center; }
-</style>
+<meta name="viewport" content="width=1920, height=1080">
+<link rel="stylesheet" href="css/app.css">
 </head>
 <body>
-<p id="msg">Opening SoundCloud…</p>
-<script>
-  // SoundCloud refuses to be framed (X-Frame-Options: DENY), so the app hands the whole window
-  // to the site. location.replace keeps this page out of history, so Back steps through
-  // SoundCloud's own pages and never lands back here.
-  var URL_HOME = "https://soundcloud.com/discover";
-  if (navigator.onLine === false) {
-    document.getElementById("msg").textContent = "No internet connection.";
-    window.addEventListener("online", function () { location.replace(URL_HOME); });
-  } else {
-    location.replace(URL_HOME);
-  }
-</script>
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none">
+  <symbol id="i-home" viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.47 6.47 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></symbol>
+  <symbol id="i-user" viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></symbol>
+  <symbol id="i-queue" viewBox="0 0 24 24"><path d="M15 6H3v2h12V6zm0 4H3v2h12v-2zM3 16h8v-2H3v2zM17 6v8.18c-.31-.11-.65-.18-1-.18-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3V8h3V6h-5z"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24"><path d="M3 17v2h6v-2H3zM3 5v2h10V5H3zm10 16v-2h8v-2h-8v-2h-2v6h2zM7 9v2H3v2h4v2h2V9H7zm14 4v-2H11v2h10zm-6-4h2V7h4V5h-4V3h-2v6z"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></symbol>
+  <symbol id="i-prev" viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></symbol>
+  <symbol id="i-next" viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></symbol>
+  <symbol id="i-shuffle" viewBox="0 0 24 24"><path d="M10.59 9.17L5.41 4 4 5.41l5.17 5.17 1.42-1.41zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4h-5.5zm.33 9.41l-1.41 1.41 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04-3.13-3.13z"/></symbol>
+  <symbol id="i-repeat" viewBox="0 0 24 24"><path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z"/></symbol>
+  <symbol id="i-repeat-one" viewBox="0 0 24 24"><path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4zm-4-2V9h-1l-2 1v1h1.5v4H13z"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M17.65 6.35A7.96 7.96 0 0 0 12 4a8 8 0 1 0 7.73 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></symbol>
+  <symbol id="i-clear" viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></symbol>
+</svg>
+
+<nav id="rail" data-nomem>
+  <div class="rail-brand"><span class="rail-wave"><i></i><i></i><i></i><i></i></span><span>SoundCloud</span></div>
+  <div class="rail-item" data-screen="home"><span class="ic"><svg viewBox="0 0 24 24"><use xlink:href="#i-home"></use></svg></span><span class="rail-label">Home</span></div>
+  <div class="rail-item" data-screen="search"><span class="ic"><svg viewBox="0 0 24 24"><use xlink:href="#i-search"></use></svg></span><span class="rail-label">Search</span></div>
+  <div class="rail-item" data-screen="profile"><span class="ic"><svg viewBox="0 0 24 24"><use xlink:href="#i-user"></use></svg></span><span class="rail-label">Profile</span></div>
+  <div class="rail-item" data-screen="queue"><span class="ic"><svg viewBox="0 0 24 24"><use xlink:href="#i-queue"></use></svg></span><span class="rail-label">Queue</span></div>
+  <div class="rail-item" data-screen="settings"><span class="ic"><svg viewBox="0 0 24 24"><use xlink:href="#i-settings"></use></svg></span><span class="rail-label">Settings</span></div>
+</nav>
+
+<main id="screens"></main>
+
+<div id="mini">
+  <div class="mini-progress"><div class="mini-fill"></div></div>
+  <div class="mini-info">
+    <img class="mini-art noart" alt="" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7">
+    <div class="mini-text"><div class="mini-title"></div><div class="mini-sub"></div></div>
+  </div>
+  <div class="mini-controls">
+    <div class="cbtn" data-act="prev"><span class="ic"><svg viewBox="0 0 24 24"><use xlink:href="#i-prev"></use></svg></span></div>
+    <div class="cbtn" data-act="play"><span class="ic"><svg viewBox="0 0 24 24"><use xlink:href="#i-play"></use></svg></span></div>
+    <div class="cbtn" data-act="next"><span class="ic"><svg viewBox="0 0 24 24"><use xlink:href="#i-next"></use></svg></span></div>
+  </div>
+</div>
+
+<div id="toast" class="toast" role="status"></div>
+
+<script src="js/config.js"></script>
+<script src="js/core.js"></script>
+<script src="js/api.js"></script>
+<script src="js/nav.js"></script>
+<script src="js/hls.js"></script>
+<script src="js/player.js"></script>
+<script src="js/views.js"></script>
+<script src="js/main.js"></script>
 </body>
 </html>

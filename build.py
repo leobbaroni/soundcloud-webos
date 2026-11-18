@@ -1,7 +1,13 @@
 """Pack app/ as a webOS .ipk: build/<id>_<version>_all.ipk. No LG tools needed.
 
+    python build.py                          release: debug beacon off, no self-test
+    python build.py --debug http://HOST:PORT debug: beacon to HOST (build/..._all-debug.ipk),
+                                             plus a "Run self-test" item in Settings. Nothing
+                                             runs by itself: without that press it acts as release.
+
 The packer follows the one in couch-tv's lg/build.py (MIT), which LG TVs from webOS 4 to 10 accept.
 """
+import argparse
 import io
 import json
 import os
@@ -43,7 +49,13 @@ def ar(members):
     return b"".join(out)
 
 
+DEBUG_ONLY = {"js/selftest.js"}
+
+
 def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--debug", metavar="HOST", help="debug beacon host, e.g. http://192.168.1.10:8765")
+    args = ap.parse_args()
     with open(os.path.join(APP, "appinfo.json"), encoding="utf-8") as f:
         info = json.load(f)
     app_id, version = info["id"], info["version"]
@@ -58,8 +70,13 @@ def main():
         if rel:
             entries.append((f"usr/palm/applications/{app_id}/{rel}", None))
         for n in sorted(names):
+            if not args.debug and rel + n in DEBUG_ONLY:
+                continue
             with open(os.path.join(dirpath, n), "rb") as f:
                 data = f.read()
+            if args.debug and rel + n == "js/config.js":
+                data = ("window.SC_CONFIG = " + json.dumps(
+                    {"debug": True, "debugHost": args.debug, "selftestButton": True}) + ";\n").encode()
             size += len(data)
             entries.append((f"usr/palm/applications/{app_id}/{rel}{n}", data))
     pkginfo = json.dumps({"id": app_id, "version": version, "app": app_id}, indent=2).encode() + b"\n"
@@ -70,7 +87,8 @@ def main():
         "Description: SoundCloud on the TV.", "webOS-Package-Format-Version: 2",
         "webOS-Packager-Version: x.y.x"]) + "\n"
     os.makedirs(OUT, exist_ok=True)
-    ipk = os.path.join(OUT, f"{app_id}_{version}_all.ipk")
+    suffix = "-debug" if args.debug else ""
+    ipk = os.path.join(OUT, f"{app_id}_{version}_all{suffix}.ipk")
     with open(ipk, "wb") as f:
         f.write(ar([("debian-binary", b"2.0\n"),
                     ("control.tar.gz", tar_gz([("control", control.encode())])),

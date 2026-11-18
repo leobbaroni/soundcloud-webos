@@ -1,0 +1,204 @@
+// Debug-only self-test: drives the app on the TV and reports each step through the debug
+// beacon. Loaded only when SC_CONFIG.selftest is true (debug packages); not shipped in release.
+(function () {
+  "use strict";
+  var SC = window.SC, player = SC.player, nav = SC.nav, router = SC.router;
+  function log() { SC.log.apply(null, ["ST"].concat(Array.prototype.slice.call(arguments))); }
+  function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+  function once(ev, ms) {
+    return new Promise(function (resolve, reject) {
+      var t = setTimeout(function () { SC.off(ev, h); reject(new Error("timeout waiting for " + ev)); }, ms || 30000);
+      function h(d) { clearTimeout(t); SC.off(ev, h); resolve(d); }
+      SC.on(ev, h);
+    });
+  }
+  function until(fn, ms, what) {
+    var start = Date.now();
+    return new Promise(function (resolve, reject) {
+      (function tick() {
+        var v; try { v = fn(); } catch (e) { v = false; }
+        if (v) return resolve(v);
+        if (Date.now() - start > (ms || 30000)) return reject(new Error("timeout: " + what));
+        setTimeout(tick, 250);
+      })();
+    });
+  }
+  function key(code) {
+    var e = document.createEvent("Event");
+    e.initEvent("keydown", true, true);
+    Object.defineProperty(e, "keyCode", { value: code });
+    document.dispatchEvent(e);
+  }
+  function desc(n) {
+    if (!n) return "none";
+    var t = (n.querySelector && (n.querySelector(".card-title, .trow-title, .btn-label, .rail-label, .setting-label")) || n);
+    return n.className.split(" ")[0] + ":" + String(t.textContent || n.value || "").slice(0, 40);
+  }
+  function heap() { return window.performance && performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1048576) + "MB" : "?"; }
+
+  var homeCounts = null;
+  SC.on("home:ready", function (c) { homeCounts = c; });
+
+  var steps = [
+    ["home", function () {
+      return until(function () { return homeCounts || (homeCounts = SC.lastHome); }, 45000, "home:ready").then(function () {
+        var rows = document.querySelectorAll(".home .row");
+        log("home rows=" + rows.length, "cards=" + document.querySelectorAll(".home .card").length, homeCounts, "focus=" + desc(nav.current()));
+        if (!rows.length) throw new Error("no home rows");
+      });
+    }],
+    ["keys", function () {
+      key(39); key(39); key(40); key(37);
+      log("after R,R,D,L focus=" + desc(nav.current()));
+      key(37); key(37); key(37);
+      log("after 3xL focus=" + desc(nav.current()));
+      key(39);
+      log("after R focus=" + desc(nav.current()));
+    }],
+    ["search", function () {
+      router.root("search");
+      var scr = router.top();
+      var p = once("search:done", 30000);
+      scr.run("lofi");
+      return p.then(function (d) {
+        log("search lofi", d, "rows=" + document.querySelectorAll(".search .row").length);
+        if (!d.tracks) throw new Error("no track results");
+      });
+    }],
+    ["playlist", function () {
+      var cards = document.querySelectorAll(".search .card");
+      var target = null;
+      for (var i = 0; i < cards.length; i++) if (cards[i]._item.kind === "playlist" && cards[i]._item.trackCount > 3) { target = cards[i]; break; }
+      if (!target) throw new Error("no playlist card");
+      nav.focus(target);
+      log("open playlist", target._item.title, String(target._item.id));
+      var p = once("playlist:ready", 30000);
+      key(13);
+      return p.then(function (d) {
+        log("playlist ready count=" + d.count, "rows=" + d.list.children.length, "focus=" + desc(nav.current()));
+      });
+    }],
+    ["play5s", function () {
+      log("press OK on", desc(nav.current()));
+      key(13);
+      return until(function () { return player.audio.currentTime > 5.2; }, 45000, "currentTime>5").then(function () {
+        log("PLAYBACK OK >5s", player.debugInfo(), "title=" + (player.current() || {}).title);
+      });
+    }],
+    // Five consecutive track switches with the remote's next key; each must play past 2 s.
+    ["switch5", function () {
+      var n = 0;
+      function one() {
+        if (n >= 5) return;
+        n++;
+        var before = player.current().id, loads = player.debugInfo().loads, t0 = Date.now();
+        key(176);
+        return until(function () {
+          var c = player.current(); return c && c.id !== before && player.debugInfo().loads > loads && player.audio.currentTime > 2;
+        }, 30000, "switch " + n + " playing").then(function () {
+          log("SWITCH " + n + " OK in " + ((Date.now() - t0) / 1000).toFixed(1) + "s", player.debugInfo());
+          return one();
+        });
+      }
+      return one();
+    }],
+    // Three next presses 200 ms apart must coalesce into a single load.
+    ["rapid", function () {
+      var loads = player.debugInfo().loads, startPos = player.queue().pos;
+      key(176);
+      return sleep(200).then(function () { key(176); return sleep(200); }).then(function () { key(176); }).then(function () {
+        return until(function () { return player.debugInfo().loads > loads && player.audio.currentTime > 2; }, 30000, "rapid playing");
+      }).then(function () {
+        return sleep(2000);
+      }).then(function () {
+        var d = player.debugInfo();
+        log("RAPID loads +" + (d.loads - loads) + " pos " + startPos + "->" + d.pos, d);
+        if (d.loads - loads !== 1) throw new Error("expected exactly 1 load, got " + (d.loads - loads));
+      });
+    }],
+    ["seekkeys", function () {
+      var t0 = player.audio.currentTime;
+      key(417);
+      return sleep(1500).then(function () { log("FF: " + t0.toFixed(1) + " -> " + player.audio.currentTime.toFixed(1)); });
+    }],
+    ["aac96", function () {
+      return SC.api.searchTracks("ambient piano", 20).then(function (list) {
+        var t = list.filter(function (x) { return x.tc.some(function (c) { return c.preset === "aac_96k"; }); })[0];
+        if (!t) { log("no aac_96k track found"); return; }
+        player._forcePreset("aac_96k");
+        var loads = player.debugInfo().loads;
+        player.playList([t], 0);
+        return until(function () { var d = player.debugInfo(); return d.loads > loads && d.id === t.id && d.preset === "aac_96k" && player.audio.currentTime > 3; }, 40000, "aac_96k play").then(function () {
+          log("AAC96 OK", player.debugInfo());
+        }).then(function () { player._forcePreset(""); }, function (e) { player._forcePreset(""); throw e; });
+      });
+    }],
+    ["autoplay", function () {
+      return SC.api.searchTracks("lofi beat", 20).then(function (list) {
+        var t = list.filter(function (x) { return x.duration > 60000 && x.duration < 480000; })[0] || list[0];
+        player.setAutoplay(true);
+        var loads = player.debugInfo().loads;
+        player.playList([t], 0);
+        return until(function () { var d = player.debugInfo(); return d.loads > loads && d.id === t.id && player.audio.currentTime > 1; }, 40000, "seed playing").then(function () {
+          var d = player.time().dur;
+          loads = player.debugInfo().loads;
+          log("seed playing, queue len=" + player.queue().items.length, "dur=" + d.toFixed(0), "seeking to end");
+          player.seek(d - 4);
+          return until(function () { var x = player.debugInfo(); return x.loads > loads && x.id !== t.id && !x.paused && player.audio.currentTime > 2; }, 60000, "autoplay next");
+        }).then(function () {
+          log("AUTOPLAY OK queue len=" + player.queue().items.length, player.debugInfo(), "title=" + player.current().title);
+        });
+      });
+    }],
+    ["nowplaying", function () {
+      router.open("now");
+      log("now open top=" + router.topName(), "focus=" + desc(nav.current()));
+      key(38); key(37);
+      log("now after U,L focus=" + desc(nav.current()));
+      key(461);
+      log("after Back top=" + router.topName(), "depth=" + router.depth());
+      router.open("queue");
+      log("queue rows=" + document.querySelectorAll(".queue .trow").length, "focus=" + desc(nav.current()));
+      key(461);
+    }],
+    ["profile-api", function () {
+      return SC.api.resolve("https://soundcloud.com/lofi_girl").then(function (u) {
+        return Promise.all([SC.api.userLikes(u.id, 20), SC.api.userPlaylists(u.id, 10)]).then(function (r) {
+          log("PROFILE resolve ok id=" + u.id, "likes=" + r[0].items.length, "playlists=" + r[1].items.length);
+        });
+      });
+    }],
+    ["back-home", function () {
+      router.root("home");
+      key(461);
+      log("back on home -> modal=" + !!document.querySelector(".modal"), "focus=" + desc(nav.current()));
+      key(461);
+      log("back again -> modal=" + !!document.querySelector(".modal"));
+    }]
+  ];
+
+  // Optional launch parameter {"selftest": true, "until": "<step>"} stops after that step.
+  var until_ = "";
+  try { until_ = (JSON.parse((window.PalmSystem && window.PalmSystem.launchParams) || "{}") || {}).until || ""; } catch (e) { until_ = ""; }
+  function run(i) {
+    if (i > 0 && until_ && steps[i - 1][0] === until_) i = steps.length;
+    if (i >= steps.length) {
+      player.pause();
+      log("SELFTEST DONE heap=" + heap());
+      window.__done = true;
+      return;
+    }
+    var s = steps[i];
+    log("step " + s[0]);
+    Promise.resolve().then(s[1]).then(function () { return sleep(500); }).then(function () { run(i + 1); }, function (e) {
+      // Stop at the first failure: pause and report, never keep going.
+      player.pause();
+      log("STEP FAIL " + s[0], e && e.message ? e.message : String(e), player.debugInfo());
+      log("SELFTEST ABORTED heap=" + heap());
+      window.__done = true;
+    });
+  }
+  log("selftest start heap=" + heap(), "mse=" + player.supported);
+  router.root("home");
+  setTimeout(function () { run(0); }, 500);
+})();
