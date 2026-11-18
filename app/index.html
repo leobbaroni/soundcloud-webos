@@ -1,0 +1,26 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>SoundCloud</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #111; color: #eee; font: 32px sans-serif; }
+  body { display: flex; align-items: center; justify-content: center; }
+</style>
+</head>
+<body>
+<p id="msg">Opening SoundCloud…</p>
+<script>
+  // SoundCloud refuses to be framed (X-Frame-Options: DENY), so the app hands the whole window
+  // to the site. location.replace keeps this page out of history, so Back steps through
+  // SoundCloud's own pages and never lands back here.
+  var URL_HOME = "https://soundcloud.com/discover";
+  if (navigator.onLine === false) {
+    document.getElementById("msg").textContent = "No internet connection.";
+    window.addEventListener("online", function () { location.replace(URL_HOME); });
+  } else {
+    location.replace(URL_HOME);
+  }
+</script>
+</body>
+</html>
