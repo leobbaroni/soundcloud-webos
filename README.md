@@ -1,97 +1,97 @@
 # SoundCloud for LG webOS TVs
 
-A native SoundCloud player for LG webOS TVs, driven by the remote. It replaces 1.0.0, which
-opened soundcloud.com full screen; SoundCloud's site rejects the TV's browser. Built for an LG
-75UM7600PLB (webOS TV Lite 4.10.2, Chromium 53, 1 GB RAM, app resolution 1920x1080).
+A SoundCloud player for LG TVs, built for the remote. SoundCloud has no LG app and its website
+refuses the browsers in older sets, so this is a small native app that talks to SoundCloud itself:
+browse, search, queue and listen from the couch.
 
-Plain HTML/CSS/JS in `app/`, no frameworks, no build step, no npm dependencies. It uses
-SoundCloud's public `api-v2` with the web client id, so there is no login: "Your profile"
-reads the public likes, playlists and tracks of a username you type once. API streams carry no
-ads, and the app adds none and loads no trackers.
+![Home screen on the TV](docs/home.jpg)
+
+![Now playing](docs/now-playing.jpg)
+
+*Frames captured from an LG 75UM7600 (2019, webOS 4).*
+
+## Features
+
+- **Home:** trending tracks, SoundCloud's curated selections, what you played recently and more
+  like your last track.
+- **Search:** tracks, artists, playlists and albums, with your recent searches.
+- **Your profile, without logging in:** type your SoundCloud username once to get your public
+  likes, playlists and tracks.
+- **Playback:** a queue with shuffle and repeat, seeking, and autoplay of similar tracks when the
+  queue ends. A mini-player stays on screen while you browse.
+- **Made for the remote:** arrows, OK and Back everywhere, the media keys, and the Magic Remote
+  pointer and wheel.
+- **Readable titles:** stylised letters (𝙇𝙤𝙛𝙞, Ⓛⓞⓕⓘ, ＬＯＦＩ) are shown as plain text, and emoji and
+  symbols draw from bundled fonts where the TV has none.
+- **Nothing extra:** no ads, no trackers, no account, no background service. About 0.8 MB
+  installed.
+
+## Will it work on my TV?
+
+| | |
+|---|---|
+| Tested | LG 75UM7600PLB (2019), webOS TV Lite 4.10.2, Chromium 53, 1 GB RAM |
+| Should work | Other webOS 4 and newer sets: the app is written for the oldest engine and uses nothing newer |
+| Needs | A way to install an `.ipk`: LG Developer Mode, or a rooted TV with the Homebrew Channel |
+
+Only the first row has been tried. If you run it on another model, an issue saying how it went is
+welcome.
+
+## Install
+
+1. Download the `.ipk` from [Releases](../../releases), or build it (below).
+2. Install it one of these ways:
+   - **webOS Dev Manager** ([webosbrew/dev-manager-desktop](https://github.com/webosbrew/dev-manager-desktop)):
+     add your TV, then Apps → Install and pick the file.
+   - **LG's command line tools:** `ares-install --device <tv> local.soundcloud.tv_<version>_all.ipk`
+   - **A rooted TV, from its shell:** copy the file to `/tmp` and run
+     `luna-send -n 1 luna://com.webos.appInstallService/dev/install '{"id":"com.ares.defaultName","ipkUrl":"/tmp/<file>.ipk","subscribe":true}'`
+3. Open **SoundCloud** from the TV's app list.
+
+With Developer Mode (not rooted), LG removes sideloaded apps when the Developer Mode session
+expires, so keep the session extended.
 
 ## Using it
 
-- **Screens:** Home (trending, recently played, "more like" your last track, your likes,
-  SoundCloud's curated selections), Search (tracks, artists, playlists, albums; recent
-  searches), Playlist/Album/Station, Artist, Your profile, Queue, Settings, and Now playing.
-  A mini-player along the bottom shows what's on while you browse.
-- **Remote:** arrows move, OK selects, Back goes up a screen (on Home it asks before exiting).
-  Play/Pause/Stop work; FF/RW seek 15 s; on Now playing, Left/Right on the progress bar seek
-  10 s. Red opens or closes Now playing. Next/Previous-track keys work when the remote sends
-  them. The Magic Remote pointer works too: point to focus, click to select, wheel to scroll.
-- **Search:** OK on the search field opens the TV keyboard; results appear as you type.
-- **Autoplay:** when the queue ends, similar tracks are added (Settings → Autoplay).
-- **Saved on the TV** (localStorage): the client id, your username, recently played, recent
-  searches and settings. Volume is the TV's.
-
-## Playback
-
-SoundCloud streams are HLS with fMP4 segments (AAC). This TV's native media pipeline must not
-be given them: it fails on them and has rebooted the TV. So `js/hls.js` fetches the playlist
-and segments with XHR and appends them to a MediaSource. A remote stream URL is never set as
-the `<audio>` source.
-
-- One attempt per track: `aac_160k`, or `aac_96k` if that's all there is. Encrypted (DRM-only)
-  tracks and `abr_sq` are never used; DRM-only tracks are marked "Not available on TV" and
-  skipped. Tracks that only have 30-second previews are labelled "Preview".
-- Track loads are at least 1.5 s apart, and Next/Previous presses within 0.5 s merge into one.
-- Buffer kept to about 60 s behind and 120 s ahead of the playhead.
-- If a track doesn't start within 20 s, stalls for 30 s or errors, the app stops it, shows a
-  toast and skips; after 3 failures in a row it stops playback.
-- Without MediaSource support for `audio/mp4; codecs="mp4a.40.2"`, the app says playback isn't
-  supported and plays nothing.
-
-## Files
-
-| File | Purpose |
+| Remote | Does |
 |---|---|
-| `app/index.html` | Shell: icon sprite, side rail, mini-player, script order |
-| `app/css/app.css` | 10-foot dark theme, focus states (Chromium 53-safe CSS) |
-| `app/js/config.js` | Build settings: debug beacon, debug host, self-test button (all off) |
-| `app/js/core.js` | Storage, debug log/beacon, DOM helpers, lazy images, toasts |
-| `app/js/api.js` | api-v2 client: client id, endpoints, data normalisation |
-| `app/js/nav.js` | Spatial focus for the remote, pointer, transform-based scrolling |
-| `app/js/hls.js` | fMP4 HLS through MediaSource |
-| `app/js/player.js` | Queue, shuffle/repeat, autoplay, load gating, watchdogs |
-| `app/js/views.js` | Cards, rows, track lists and the screens |
-| `app/js/main.js` | Screen stack and Back, mini-player, Now playing, keys, boot |
-| `app/js/selftest.js` | Debug packages only: drives the app and reports via the beacon |
-| `build.py` | Packs `app/` into an `.ipk` |
+| Arrows / OK | Move and select |
+| Back | Up one screen (on Home it asks before leaving) |
+| Play, Pause, Stop | Control playback |
+| Fast forward / Rewind | Seek 15 seconds |
+| Left / Right on the progress bar | Seek 10 seconds |
+| Red | Open or close Now playing |
+| Pointer and wheel | Point to focus, click to select, scroll rows |
 
-## Build and install
+Search opens the TV's own keyboard. Volume is the TV's. Your username, recent searches, recently
+played and settings are kept on the TV only.
+
+## Build
+
+Python 3 is all it needs; there are no dependencies and no build step for the app itself.
 
 ```sh
-python build.py                                  # build/local.soundcloud.tv_1.1.0_all.ipk
-python build.py --debug http://<pc-ip>:<port>    # build/local.soundcloud.tv_1.1.0_all-debug.ipk
+python build.py     # writes build/local.soundcloud.tv_<version>_all.ipk
 ```
 
-The release package ships with the beacon off, an empty debug host and no `selftest.js`. The
-debug package sends log lines to `http://<pc-ip>:<port>/probe?<line>` (any static server's
-request log will do) and adds "Run self-test" to Settings. The self-test never starts on a
-normal launch: only from that item, or when launched with the explicit parameter
-`{"selftest": true}`. A release build can also log if `localStorage.sc_debug` and
-`localStorage.sc_debug_host` are set.
+The app is plain HTML, CSS and JavaScript in [`app/`](app). How it plays audio on old TVs, the
+SoundCloud endpoints it uses, the debug build and its self-test, and the font pipeline are in
+[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
 
-Install with `ares-install --device <tv> build/<file>.ipk`. On a rooted TV without Developer
-Mode, copy the `.ipk` to `/tmp` on the TV and run
-`luna-send -n 1 luna://com.webos.appInstallService/dev/install '{"id":"com.ares.defaultName","ipkUrl":"/tmp/<file>.ipk","subscribe":true}'`.
+## Good to know
 
-## SoundCloud endpoints
+- **Unofficial.** This project is not affiliated with or endorsed by SoundCloud. It uses the same
+  public web API as soundcloud.com, with no API key of its own, so a change on SoundCloud's side
+  can break it without notice.
+- **No login.** Private tracks, your stream and SoundCloud Go+ content are not available. Tracks
+  that only offer a 30-second preview are labelled "Preview", and DRM-only tracks are skipped.
+- **Streaming only.** Nothing is downloaded or saved. Please respect artists and
+  [SoundCloud's terms](https://soundcloud.com/terms-of-use).
+- **Emoji are monochrome.** The engine in these TVs cannot use colour emoji fonts.
+- The icon is a plain cloud, not SoundCloud's logo.
 
-These work with just `client_id`, which is read from `m.soundcloud.com`'s HTML and
-refreshed on 401/403: `/search/tracks`, `/search/playlists_without_albums`,
-`/search/albums`, `/search/users`, `/resolve`, `/users/{id}`, `/users/{id}/tracks`,
-`/toptracks`, `/likes`, `/playlists_without_albums`, `/albums`, `/playlists/{id}`,
-`/system-playlists/{urn}`, `/tracks?ids=` (50 per call), `/tracks/{id}/related`,
-`/charts?kind=trending&genre=soundcloud:genres:all-music`, `/mixed-selections`, and the
-transcoding URL with `track_authorization`. `kind=top` charts, genre charts, `/discover/sets`
-and `/users/{id}/reposts` return 404.
+## Licence
 
-Not affiliated with SoundCloud. The icon is a plain cloud, not SoundCloud's logo.
-
-## Status
-
-1.1.0 runs on an LG 75UM7600PLB (webOS TV Lite 4.10.2, Chrome 53). The debug self-test passed on the
-TV: playback past 5 s at `aac_160k` through MediaSource, five track switches in a row, debounced
-skips, an `aac_96k` track, and autoplay of related tracks when the queue ends, with no faults in the
-kernel log. Layout and focus were checked from a captured frame, not yet by long use on the couch.
+The code is under the [MIT licence](LICENSE). The fonts in `app/fonts/` are Noto fonts under the
+SIL Open Font License 1.1; their licence texts sit next to them. "SoundCloud" is a trademark of its
+owner and is used here only to say what the app connects to.

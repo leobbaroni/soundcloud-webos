@@ -213,13 +213,13 @@
       art.className = "now-img";
       art.src = t.artwork ? SC.art(t.artwork, "t500x500") : SC.BLANK;
       if (!t.artwork) art.className += " noart";
-      title.textContent = t.title;
-      artist.textContent = t.user.username || "";
+      title.textContent = SC.text(t.title);
+      artist.textContent = SC.text(t.user.username);
       updNext();
     }
     function updNext() {
       var n = player.upNext();
-      upNext.textContent = n ? "Up next · " + (n.title || "Loading…") + (n.user && n.user.username ? " — " + n.user.username : "") :
+      upNext.textContent = n ? SC.text("Up next · " + (n.title || "Loading…") + (n.user && n.user.username ? " — " + n.user.username : "")) :
         (player.state.autoplay ? "Up next · similar tracks (autoplay)" : "End of queue");
     }
     function setState(st) {
@@ -248,8 +248,8 @@
     miniArt.className = "mini-art";
     miniArt.src = t.artwork ? SC.art(t.artwork, "t300x300") : SC.BLANK;
     if (!t.artwork) miniArt.className += " noart";
-    miniTitle.textContent = t.title;
-    miniSub.textContent = t.user.username || "";
+    miniTitle.textContent = SC.text(t.title);
+    miniSub.textContent = SC.text(t.user.username);
     now.setTrack(t);
     markPlaying(t.id);
   });

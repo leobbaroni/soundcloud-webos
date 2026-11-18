@@ -206,7 +206,7 @@
     if (opts.byline) {
       var by = el("div", "hero-by");
       if (opts.onBy) { by.className += " link focusable"; nav.bind(by, opts.onBy); }
-      by.textContent = opts.byline;
+      by.textContent = SC.text(opts.byline);
       info.appendChild(by);
     }
     if (opts.meta) info.appendChild(el("div", "hero-meta", opts.meta));
