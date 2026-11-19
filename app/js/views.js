@@ -237,12 +237,27 @@
     var status = spinner("Loading music…");
     rows.appendChild(status);
 
+    // The two "recent" rows change while the app is open, so they live in their own box and are
+    // redrawn when Home is shown again; the rest of Home (and the place on it) stays as it was.
+    var recentBox = null, recentSig = "", builtProfile = 0;
+    function recentNow() {
+      var r = SC.store.get("recent", []), s = SC.store.get("recent_sets", []);
+      return { tracks: r, sets: s, sig: r.length + ":" + (r[0] ? r[0].id : "") + "|" + s.length + ":" + (s[0] ? s[0].id : "") };
+    }
+    function fillRecent(counts) {
+      var n = recentNow();
+      SC.clear(recentBox);
+      if (n.tracks.length) recentBox.appendChild(row("Recently played", n.tracks));
+      if (n.sets.length) recentBox.appendChild(row("Recent playlists", n.sets));
+      recentSig = n.sig;
+      if (counts) { counts.recent = n.tracks.length; counts.recentSets = n.sets.length; }
+    }
     function build() {
       SC.clear(rows);
       rows.appendChild(status);
       var recent = SC.store.get("recent", []);
-      var recentSets = SC.store.get("recent_sets", []);
       var profile = SC.profiles.list()[0];
+      builtProfile = profile ? profile.id : 0;
       var jobs = [], counts = {};
       function add(name, promise, render) {
         var s = slot(rows);
@@ -254,8 +269,9 @@
         }, function (e) { counts[name] = "error:" + e.message; s.drop(); return false; });
         jobs.push(j);
       }
-      if (recent.length) add("recent", Promise.resolve(recent), function (d) { return row("Recently played", d); });
-      if (recentSets.length) add("recentSets", Promise.resolve(recentSets), function (d) { return row("Recent playlists", d); });
+      recentBox = el("div", "rowgroup");
+      rows.appendChild(recentBox);
+      fillRecent(counts);
       add("trending", api.trending("all-music", 20), function (d) { return d.length ? row("Trending on SoundCloud", d) : null; });
       if (recent.length) {
         add("related", api.related(recent[0].id, 20), function (d) {
@@ -299,7 +315,15 @@
     }
     function wrap(frag) { var d = el("div", "rowgroup"); d.appendChild(frag); return d; }
     build();
-    return { el: p.el, scroller: p.scroller, refresh: build };
+    return { el: p.el, scroller: p.scroller, refresh: build,
+      onShow: function () {
+        var first = SC.profiles.list()[0];
+        if ((first ? first.id : 0) !== builtProfile) { build(); return; }   // "Liked by" follows the first profile
+        if (!recentBox || recentNow().sig === recentSig) return;
+        var had = recentBox.contains(nav.current());
+        fillRecent(null);
+        if (had) nav.focusFirst(p.el);
+      } };
   };
 
   // ---------- Search ----------

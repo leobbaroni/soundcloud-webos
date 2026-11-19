@@ -182,5 +182,6 @@ track, and autoplay of related tracks when the queue ends, with no faults in the
 three bundled fonts load there and the samples in "Fancy titles, symbols and emoji" draw. Other TVs
 and webOS versions are untested.
 
-1.3.0 (natural end of track, profiles, recent playlists, scrolling) has so far been tested in
-desktop Chrome only, where the whole self-test passes, `natural-end` included.
+1.3.0 was run there too: the full self-test including `natural-end` (two tracks in a row left to
+finish, the next one starting by itself each time, detected by `via=duration`), adding a profile by
+name search, and the Home rows refreshing without a restart.
