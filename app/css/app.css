@@ -115,7 +115,6 @@ body.immersive #screens { left: 0; bottom: 0; }
   font-size: 22px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase;
   color: var(--accent); margin-bottom: 14px;
 }
-.section-title { padding: 0 var(--gutter); margin: 8px 0 20px; font-size: 34px; font-weight: 500; }
 
 /* ---------------- rows of cards ---------------- */
 .row { margin-bottom: 28px; }
@@ -245,11 +244,31 @@ body.immersive #screens { left: 0; bottom: 0; }
 }
 .chip.focused { background: var(--focus); color: var(--on-focus); transform: scale(1.06); }
 
-/* ---------------- profile setup ---------------- */
-.setup { padding: 0 var(--gutter); max-width: 1400px; }
-.setup .page-lede { margin-bottom: 44px; }
-.setup .search-field { margin-bottom: 18px; max-width: 900px; }
-.form-error { min-height: 40px; margin-bottom: 20px; font-size: 26px; color: #ff8a65; }
+/* ---------------- profiles ---------------- */
+.account { padding-top: 12px; }
+.acct-head { display: flex; align-items: center; padding: 0 var(--gutter); margin-bottom: 30px; }
+.acct-img { flex: 0 0 auto; width: 112px; height: 112px; border-radius: 56px; object-fit: cover; background: var(--surface-2); }
+.acct-info { flex: 1 1 auto; min-width: 0; margin-left: 32px; }
+.acct-name { font-size: 44px; font-weight: 700; line-height: 1.15; }
+.acct-sub { margin-top: 4px; font-size: 24px; color: var(--text-3); }
+.acct-name, .acct-sub, .acct-row-name, .acct-row-sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.acct-actions { display: flex; align-items: center; flex: 0 0 auto; margin-left: 24px; }
+.btn.small { height: 58px; padding: 0 26px; margin-right: 14px; border-radius: 29px; font-size: 22px; }
+.btn.small .ic { font-size: 28px; }
+.note { padding: 0 var(--gutter); margin-bottom: 40px; font-size: 26px; color: var(--text-3); }
+.acct-status { margin-bottom: 24px; }
+.acct-list { padding: 0 var(--gutter); max-width: 1400px; }
+.acct {
+  display: flex; align-items: center; height: 128px; padding: 0 28px; margin-bottom: 8px;
+  border-radius: 14px; background: var(--surface); transition: transform 0.14s var(--ease);
+}
+.acct-row-img { flex: 0 0 auto; width: 88px; height: 88px; border-radius: 44px; object-fit: cover; background: var(--surface-2); }
+.acct-mid { flex: 1 1 auto; min-width: 0; margin-left: 28px; }
+.acct-row-name { font-size: 30px; font-weight: 500; }
+.acct-row-sub { margin-top: 2px; font-size: 22px; color: var(--text-3); }
+.acct-tag { flex: 0 0 auto; margin-left: 24px; font-size: 22px; font-weight: 500; color: var(--accent); }
+.acct.focused { background: var(--focus); color: var(--on-focus); transform: scale(1.01); }
+.acct.focused .acct-row-sub { color: #4a4a52; }
 
 /* ---------------- settings ---------------- */
 .settings-list { padding: 0 var(--gutter); max-width: 1500px; }

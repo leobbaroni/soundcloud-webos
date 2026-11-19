@@ -52,6 +52,72 @@
     clearTimeout(c._imgT);
     c._imgT = setTimeout(function () { SC.recheckImages(c); }, 320);
   }
+  // Vertical resting offset: the screen's edges should not cut a line of text.
+  // Blocks are the scroller's [.vis] elements (rows, list rows, headers, notes), measured by
+  // their content (the union of their children, less a row's empty room for the focus ring).
+  // Hard rules: the top edge never falls inside a block's content, and the focused block's
+  // content (or at least its title) shows. Preferred, in this order: at least COMFORT px
+  // above the first block below the top edge; a bottom edge that doesn't cut a title (a row's
+  // head, or a whole one-line block such as a list row; with evenly spaced list rows this is
+  // not always possible); and the offset closest to the plain "keep it in view" one.
+  var COMFORT = 40;
+  function blockOf(b, n) {
+    var top = offsetWithin(b, n, "y"), cTop = Infinity, cBot = -Infinity, kids = b.children;
+    for (var i = 0; i < kids.length; i++) {
+      var c = kids[i], h = c.offsetHeight;
+      if (!h) continue;
+      var ct = offsetWithin(c, n, "y"), cb = ct + h;
+      if (i === kids.length - 1) cb -= parseFloat(getComputedStyle(c).paddingBottom) || 0;
+      if (ct < cTop) cTop = ct;
+      if (cb > cBot) cBot = cb;
+    }
+    if (!(cBot > cTop)) { cTop = top; cBot = top + b.offsetHeight; }
+    var first = b.firstElementChild, head = cBot;
+    if (first && (first.classList.contains("row-head") || /^H[1-3]$/.test(first.tagName))) head = offsetWithin(first, n, "y") + first.offsetHeight;
+    // 2 px allowance: offsets are whole pixels, line boxes are not
+    return { top: cTop - 2, bottom: cBot + 2, head: head + 2 };
+  }
+  function restY(n, target, base, view) {
+    var max = Math.max(0, contentExtent(n, "y") - view);
+    base = Math.max(0, Math.min(base, max));
+    var T = blockOf(target, n), lo = T.top - 2 * view, hi = T.bottom + 2 * view;
+    var all = n.querySelectorAll(".vis"), blocks = [], i;
+    for (i = 0; i < all.length; i++) {
+      var b = all[i];
+      if (!b.offsetHeight || b === target || b.contains(target) || target.contains(b)) continue;
+      var top = offsetWithin(b, n, "y");
+      if (top > hi || top + b.offsetHeight < lo) continue;
+      blocks.push(blockOf(b, n));
+    }
+    // -1: not allowed; otherwise the penalty for this offset
+    function cost(s) {
+      var e = s + view, gap = T.top - s, k, x, pen = 0;
+      if (T.top < s || Math.min(T.bottom, T.head + view / 2) > e) return -1;
+      for (k = 0; k < blocks.length; k++) {
+        x = blocks[k];
+        if (x.top < s && s < x.bottom) return -1;
+        if (x.top >= s && x.top - s < gap) gap = x.top - s;
+        if (x.top < e && e < x.head) pen = 150;
+      }
+      return pen + (s > 0 && gap < COMFORT ? 300 : 0) + Math.abs(s - base);
+    }
+    var cand = [base, 0, max, T.top - 60, T.bottom - view], prev = 0;
+    for (i = 0; i < blocks.length; i++) {
+      var x = blocks[i];
+      cand.push(x.bottom, x.top - 60, x.top - 16, x.top - view, x.head + 12 - view, x.bottom + 12 - view);
+      if (x.bottom <= T.top) { cand.push(Math.max(prev, x.top - 60)); prev = Math.max(prev, x.bottom); }
+    }
+    cand.push(Math.max(prev, T.top - 60));
+    var best = base, bestScore = Infinity;
+    for (i = 0; i < cand.length; i++) {
+      var s = Math.round(cand[i]);
+      if (s < 0 || s > max) continue;
+      var c = cost(s);
+      if (c >= 0 && c < bestScore) { bestScore = c; best = s; }
+    }
+    return best;
+  }
+
   function ensureVisible(el, onlyAxis) {
     var n = el.parentNode;
     while (n && n !== document.body) {
@@ -72,6 +138,7 @@
           else if (off + size - s > view - pad) s = off + size - view + pad;
         }
         if (target.hasAttribute("data-top")) s = 0;
+        if (axis === "y") s = restY(n, target, s, view);
         setScroll(n, s, axis);
       }
       n = n.parentNode;
@@ -104,20 +171,26 @@
     if (cur._key && cur._key(dir)) return true;
     var c = cur.getBoundingClientRect(), cc = center(c);
     var best = null, bestScore = Infinity, tol = 12;
-    var list = candidates();
-    for (var i = 0; i < list.length; i++) {
-      var e = list[i];
-      if (e === cur) continue;
-      var r = e.getBoundingClientRect(), rc = center(r), primary, secondary;
-      if (dir === "right") { if (rc.x <= cc.x + 1 || r.left < c.left + tol) continue; primary = Math.max(0, r.left - c.right); secondary = gap(c.top, c.bottom, r.top, r.bottom); }
-      else if (dir === "left") { if (rc.x >= cc.x - 1 || r.right > c.right - tol) continue; primary = Math.max(0, c.left - r.right); secondary = gap(c.top, c.bottom, r.top, r.bottom); }
-      else if (dir === "down") { if (rc.y <= cc.y + 1 || r.top < c.top + tol) continue; primary = Math.max(0, r.top - c.bottom); secondary = gap(c.left, c.right, r.left, r.right); }
-      else { if (rc.y >= cc.y - 1 || r.bottom > c.bottom - tol) continue; primary = Math.max(0, c.top - r.bottom); secondary = gap(c.left, c.right, r.left, r.right); }
-      var along = (dir === "left" || dir === "right") ? Math.abs(rc.y - cc.y) : Math.abs(rc.x - cc.x);
-      var score = primary + secondary * 4 + along * 0.15;
-      if (score < bestScore) { bestScore = score; best = e; }
-    }
+    // Stay in the current scope while it has something in that direction (a row scrolled out
+    // of view below must win over the mini-player that covers it); else cross to another.
+    var here = scopeOf(cur), all = candidates();
+    pick(all.filter(function (e) { return scopeOf(e) === here; }));
+    if (!best) pick(all);
     if (!best) return false;
+    function pick(list) {
+      for (var i = 0; i < list.length; i++) {
+        var e = list[i];
+        if (e === cur) continue;
+        var r = e.getBoundingClientRect(), rc = center(r), primary, secondary;
+        if (dir === "right") { if (rc.x <= cc.x + 1 || r.left < c.left + tol) continue; primary = Math.max(0, r.left - c.right); secondary = gap(c.top, c.bottom, r.top, r.bottom); }
+        else if (dir === "left") { if (rc.x >= cc.x - 1 || r.right > c.right - tol) continue; primary = Math.max(0, c.left - r.right); secondary = gap(c.top, c.bottom, r.top, r.bottom); }
+        else if (dir === "down") { if (rc.y <= cc.y + 1 || r.top < c.top + tol) continue; primary = Math.max(0, r.top - c.bottom); secondary = gap(c.left, c.right, r.left, r.right); }
+        else { if (rc.y >= cc.y - 1 || r.bottom > c.bottom - tol) continue; primary = Math.max(0, c.top - r.bottom); secondary = gap(c.left, c.right, r.left, r.right); }
+        var along = (dir === "left" || dir === "right") ? Math.abs(rc.y - cc.y) : Math.abs(rc.x - cc.x);
+        var score = primary + secondary * 4 + along * 0.15;
+        if (score < bestScore) { bestScore = score; best = e; }
+      }
+    }
     // Entering another scope (rail <-> screen <-> mini-player): return to where focus was.
     var fromScope = scopeOf(cur), toScope = scopeOf(best);
     if (toScope && toScope !== fromScope && toScope._last && toScope._last !== cur && SC.inDoc(toScope._last) && visible(toScope._last) && !toScope.hasAttribute("data-nomem")) {

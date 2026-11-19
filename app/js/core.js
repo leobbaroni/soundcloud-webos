@@ -72,6 +72,49 @@
     });
   };
 
+  // ---- linked profiles: an ordered list of {id, permalink, name, avatar} under "profiles" ----
+  // Up to 1.2.0 one {id, username, name, avatar} was kept under "profile": on first use it
+  // becomes the only entry, and the old key is removed once the list is safely written.
+  function readProfiles() {
+    var l = SC.store.get("profiles", null);
+    if (!l) {
+      var old = SC.store.get("profile", null);
+      l = old && old.id ? [{ id: old.id, permalink: old.username || "", name: old.name || old.username || "", avatar: old.avatar || "" }] : [];
+      SC.store.set("profiles", l);
+      if (old && SC.store.get("profiles", null)) SC.store.set("profile", null);
+    }
+    return Array.isArray(l) ? l.filter(function (p) { return p && p.id; }) : [];
+  }
+  function writeProfiles(l) {
+    var before = readProfiles()[0];
+    SC.store.set("profiles", l);
+    // Home's likes row follows the first profile: rebuild it only when that one changes
+    if ((before && before.id) !== (l[0] && l[0].id)) SC.emit("profile:changed");
+  }
+  SC.profiles = {
+    list: readProfiles,
+    // Returns false when that account is already linked.
+    add: function (p) {
+      var l = readProfiles();
+      for (var i = 0; i < l.length; i++) if (l[i].id === p.id) return false;
+      l.push({ id: p.id, permalink: p.permalink || "", name: p.name || p.permalink || "", avatar: p.avatar || "" });
+      writeProfiles(l);
+      return true;
+    },
+    remove: function (id) { writeProfiles(readProfiles().filter(function (p) { return p.id !== id; })); },
+    // Move one place up (-1) or down (+1); returns the new list.
+    move: function (id, delta) {
+      var l = readProfiles(), i = -1;
+      for (var k = 0; k < l.length; k++) if (l[k].id === id) i = k;
+      var j = i + delta;
+      if (i < 0 || j < 0 || j >= l.length) return l;
+      var t = l[i]; l[i] = l[j]; l[j] = t;
+      writeProfiles(l);
+      return l;
+    },
+    clear: function () { writeProfiles([]); }
+  };
+
   // ---- display text: styled "fancy" Unicode -> plain text (display only, never for API input) ----
   // The TV's fonts lack mathematical/full-width/enclosed letters, so they would draw as squares.
   // NFKC folds most of them; the table below covers look-alikes NFKC leaves alone.

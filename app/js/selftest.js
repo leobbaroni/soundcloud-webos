@@ -150,6 +150,70 @@
         });
       });
     }],
+    // A track that ends by itself must start the next queue item, twice in a row. The tail is
+    // buffered first (seek ~90 s from the end, wait for every segment), then a seek inside the
+    // buffer to 6 s from the end lets it play out with no further help.
+    ["natural-end", function () {
+      var saved = { shuffle: player.state.shuffle, repeat: player.state.repeat };
+      player.state.shuffle = false; player.state.repeat = "off";
+      function restore() { player.state.shuffle = saved.shuffle; player.state.repeat = saved.repeat; }
+      function bufEnd() { var b = player.audio.buffered; return b.length ? b.end(b.length - 1) : 0; }
+      function state() {
+        var a = player.audio;
+        return { t: +a.currentTime.toFixed(2), dur: +(+a.duration).toFixed(2), bufEnd: +bufEnd().toFixed(2), ready: a.readyState,
+          ended: a.ended, paused: a.paused, info: player.debugInfo() };
+      }
+      function pick() {
+        return SC.api.searchPlaylists("lofi chill", 20).then(function (pls) {
+          pls = pls.filter(function (p) { return !p.system && p.trackCount >= 3; });
+          var i = 0;
+          function tryOne() {
+            if (i >= pls.length || i >= 6) throw new Error("no playlist with 3 normal-length tracks");
+            var pl = pls[i++];
+            return SC.api.playlist(pl).then(function (full) {
+              var ids = full.tracks.slice(0, 40).map(function (t) { return t.id; });
+              return SC.api.tracks(ids).then(function (ts) {
+                var ok = ts.filter(function (t) { return t && t.playable && !t.preview && t.duration > 110000 && t.duration < 400000; });
+                return ok.length >= 3 ? { pl: full, tracks: ok.slice(0, 3) } : tryOne();
+              });
+            }, tryOne);
+          }
+          return tryOne();
+        });
+      }
+      function endOnce(n, cur, nxt) {
+        var d = player.time().dur, loads = player.debugInfo().loads, t0;
+        log("natural-end " + n + ": " + cur.id + " dur=" + d.toFixed(1) + ", buffering the tail");
+        player.seek(Math.max(1, d - 90));
+        return until(function () { return bufEnd() >= d - 1; }, 40000, "tail buffered").then(function () {
+          return sleep(1500);
+        }).then(function () {
+          player.seek(d - 6);
+          t0 = Date.now();
+          log("natural-end " + n + ": seeked to " + (d - 6).toFixed(1), state());
+          return until(function () {
+            var x = player.debugInfo(); return x.id === nxt.id && x.loads > loads && !x.paused && player.audio.currentTime > 3;
+          }, 20000, "next track playing past 3 s");
+        }).then(function () {
+          log("NATURAL-END " + n + " OK in " + ((Date.now() - t0) / 1000).toFixed(1) + "s", "next=" + nxt.id, player.debugInfo());
+        }, function (e) {
+          log("NATURAL-END " + n + " FAIL", e.message, state());
+          throw e;
+        });
+      }
+      return pick().then(function (r) {
+        var list = r.tracks, loads = player.debugInfo().loads;
+        log("natural-end playlist " + r.pl.id + " tracks " + list.map(function (t) { return t.id + "/" + Math.round(t.duration / 1000) + "s"; }).join(" "));
+        player.playList(list, 0, { from: r.pl });
+        return until(function () { var x = player.debugInfo(); return x.loads > loads && x.id === list[0].id && player.audio.currentTime > 1; }, 40000, "first track playing").then(function () {
+          return endOnce(1, list[0], list[1]);
+        }).then(function () {
+          return until(function () { return player.audio.currentTime > 3.5; }, 20000, "second track settled");
+        }).then(function () {
+          return endOnce(2, list[1], list[2]);
+        });
+      }).then(restore, function (e) { restore(); throw e; });
+    }],
     ["nowplaying", function () {
       router.open("now");
       log("now open top=" + router.topName(), "focus=" + desc(nav.current()));
@@ -177,11 +241,16 @@
     }]
   ];
 
-  // Optional launch parameter {"selftest": true, "until": "<step>"} stops after that step.
-  var until_ = "";
-  try { until_ = (JSON.parse((window.PalmSystem && window.PalmSystem.launchParams) || "{}") || {}).until || ""; } catch (e) { until_ = ""; }
+  // Optional launch parameters {"selftest": true, "until": "<step>"} stops after that step;
+  // "only": "<step>,<step>" runs just those steps.
+  var until_ = "", only = "";
+  try {
+    var lp = JSON.parse((window.PalmSystem && window.PalmSystem.launchParams) || "{}") || {};
+    until_ = lp.until || ""; only = lp.only ? "," + lp.only + "," : "";
+  } catch (e) { until_ = ""; only = ""; }
   function run(i) {
     if (i > 0 && until_ && steps[i - 1][0] === until_) i = steps.length;
+    while (only && i < steps.length && only.indexOf("," + steps[i][0] + ",") < 0) i++;
     if (i >= steps.length) {
       player.pause();
       log("SELFTEST DONE heap=" + heap());

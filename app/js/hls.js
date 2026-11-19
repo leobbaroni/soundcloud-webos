@@ -82,7 +82,7 @@
   Engine.prototype.open = function (url) {
     this.close();
     var gen = ++this.gen, self = this, audio = this.audio;
-    var s = { gen: gen, next: 0, busy: false, failures: 0, ended: false };
+    var s = { gen: gen, next: 0, busy: false, failures: 0 };
     this.s = s;
     function live() { return self.s === s && self.gen === gen; }
     var pl = get(url, false);
@@ -162,9 +162,28 @@
     return Math.round(tot);
   };
 
+  // Where the stream stands, for end-of-track detection: every segment appended (all),
+  // the MediaSource state, and the end of the buffered range holding the playhead.
+  Engine.prototype.endInfo = function () {
+    var s = this.s;
+    if (!s || !s.sb || !s.pl || !s.ms) return null;
+    var t = this.audio.currentTime, b = s.sb.buffered, end = 0;
+    for (var i = 0; i < b.length; i++) if (t >= b.start(i) - 0.3 && t <= b.end(i) + 0.3) end = b.end(i);
+    return { all: s.next >= s.pl.segs.length && !s.busy, ms: s.ms.readyState, bufEnd: end };
+  };
+
   Engine.prototype.pump = function () {
     var s = this.s;
     if (!s || !s.sb || !s.pl || s.busy || s.sb.updating || !s.ms || s.ms.readyState === "closed") return;
+    // Every segment is in: signal end of stream, and do it again whenever the MediaSource is
+    // "open". No trimming from here on (nothing more is appended): a remove() on an ended
+    // MediaSource reopens it, and then the media element never reaches "ended".
+    if (s.next >= s.pl.segs.length) {
+      if (s.ms.readyState === "open") {
+        try { s.ms.endOfStream(); } catch (e2) { /* ignore */ }
+      }
+      return;
+    }
     var t = this.audio.currentTime, b = s.sb.buffered;
     // Trim played audio beyond the back limit.
     if (b.length && t - b.start(0) > BEHIND + 10) {
@@ -173,13 +192,6 @@
     // Trim anything far ahead (left over from a backwards seek).
     if (b.length && b.end(b.length - 1) - t > AHEAD + 30) {
       try { s.sb.remove(t + AHEAD, b.end(b.length - 1)); return; } catch (e1) { /* ignore */ }
-    }
-    if (s.next >= s.pl.segs.length) {
-      if (!s.ended && s.ms.readyState === "open") {
-        s.ended = true;
-        try { s.ms.endOfStream(); } catch (e2) { /* ignore */ }
-      }
-      return;
     }
     if (this.ahead() > AHEAD) return;
     this.fetchSegment(s, s.next);
@@ -221,8 +233,7 @@
     if (s.req) { try { s.req.abort(); } catch (e) { /* ignore */ } s.req = null; s.busy = false; }
     var t = this.audio.currentTime, segs = s.pl.segs, i = 0;
     while (i < segs.length - 1 && t >= segs[i].start + segs[i].dur) i++;
-    s.next = i;
-    s.ended = false;                          // appending reopens an "ended" MediaSource
+    s.next = i;                               // appending reopens an "ended" MediaSource
     this.pump();
   };
 

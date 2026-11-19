@@ -136,6 +136,7 @@
     ]);
   }
   SC.confirmExit = confirmExit;
+  SC.modal = openModal;   // (title, text, [{label, icon, act}]): the first action is focused
 
   // =================== mini-player ===================
   var miniArt = mini.querySelector(".mini-art");

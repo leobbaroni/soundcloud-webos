@@ -21,14 +21,20 @@
   var START_LIMIT = 20000; // ms to reach "playing" after a load
   var STALL_LIMIT = 30000; // ms of continuous "waiting" before giving up
   var MAX_FAILS = 3;       // consecutive failed tracks before playback stops
+  var END_NEAR = 0.5;      // s from the end of buffered data that counts as "at the end"
+  var END_IDLE = 1500;     // ms the playhead must sit still there before the track counts as finished
+  var END_TAIL = 0.3;      // s before a finite duration that counts as finished
 
   var items = [];        // tracks (full or stubs), in the order they were queued
   var order = [];        // play order: indexes into items
   var pos = -1;          // position in order
   var current = null;    // the track shown as playing
   var token = 0;         // bumps on every load request so stale async work is dropped
-  var session = null;    // {tok, track, preset}
+  var session = null;    // {tok, track, preset, finished}
   var loading = false;
+  var userPaused = false; // paused from the remote/UI (a still playhead is then not an end)
+  var endWatch = { t: -1, since: 0 };
+  var lastFinish = "";   // which detector ended the last track (debug)
   var failStreak = 0;
   var lastOpen = 0;      // time of the last track load
   var opens = 0;         // number of track loads (debug)
@@ -90,6 +96,16 @@
     if (recent.length > 30) recent.length = 30;
     SC.store.set("recent", recent);
   }
+  // Playlists, albums and stations that playback was started from, newest first.
+  function rememberSet(pl) {
+    if (!pl || pl.kind !== "playlist" || !pl.id) return;
+    var sets = SC.store.get("recent_sets", []).filter(function (r) { return r.id !== pl.id; });
+    sets.unshift({ kind: "playlist", id: pl.id, system: !!pl.system, isAlbum: !!pl.isAlbum, title: pl.title || "",
+      subtitle: pl.subtitle || "", artwork: pl.artwork || "", trackCount: pl.trackCount || 0,
+      user: { id: pl.user ? pl.user.id : 0, username: pl.user ? pl.user.username : "" }, ts: Date.now() });
+    if (sets.length > 20) sets.length = 20;
+    SC.store.set("recent_sets", sets);
+  }
 
   function unsupported() {
     SC.log("playback refused: MSE AAC/fMP4 not supported");
@@ -131,7 +147,9 @@
   }
 
   function start(t, tc, tok) {
-    session = { tok: tok, track: t, preset: tc.preset };
+    session = { tok: tok, track: t, preset: tc.preset, finished: false };
+    userPaused = false;
+    endWatch.since = 0;
     lastOpen = Date.now();
     opens++;
     engine.close();
@@ -192,11 +210,16 @@
     if (!session || loading) return;
     var tok = token, t = session.track;
     clearTimeout(stallTimer);
-    stallTimer = setTimeout(function () { if (tok === token) report(t, "stalled", true); }, STALL_LIMIT);
+    if (atEnd()) return;     // waiting at the very end is the end (checkFinish takes it), not a stall
+    stallTimer = setTimeout(function () {
+      if (tok !== token) return;
+      if (atEnd()) finish("stall-at-end"); else report(t, "stalled", true);
+    }, STALL_LIMIT);
   });
   audio.addEventListener("canplay", function () { SC.emit("player:buffering", false); });
   audio.addEventListener("timeupdate", function () {
     if (session) SC.emit("player:time", { cur: audio.currentTime, dur: duration() });
+    checkFinish();
   });
   audio.addEventListener("error", function () {
     if (!session || session.tok !== token || !engine.active()) return;
@@ -206,9 +229,42 @@
   });
   audio.addEventListener("ended", function () {
     if (!session || !engine.active()) return;
-    if (state.repeat === "one") { audio.currentTime = 0; audio.play(); return; }
-    next(true);
+    finish("ended");
   });
+
+  // ---- end of track ----
+  // Old MSE implementations may never fire "ended" (playback stops a little short of the
+  // duration, or the duration is longer than the appended audio), so three detectors feed
+  // one finish() that acts once per track: the "ended" event; every segment appended and
+  // the playhead within END_NEAR s of the buffered end, still for END_IDLE ms; or the
+  // playhead within END_TAIL s of a finite duration. A pause from the remote or a pending
+  // load never counts.
+  function atEnd() {
+    var e = engine.endInfo();
+    return !!e && e.all && e.bufEnd > 0 && audio.currentTime >= e.bufEnd - END_NEAR;
+  }
+  function checkFinish() {
+    if (!session || session.tok !== token || session.finished || loading || !engine.active()) return;
+    if (audio.ended) { finish("ended-flag"); return; }
+    if (userPaused) { endWatch.since = 0; return; }
+    var t = audio.currentTime, d = audio.duration;
+    if (isFinite(d) && d > 0 && t >= d - END_TAIL) { finish("duration"); return; }
+    if (!atEnd()) { endWatch.since = 0; return; }
+    if (!endWatch.since || Math.abs(t - endWatch.t) > 0.05) { endWatch.t = t; endWatch.since = Date.now(); return; }
+    if (Date.now() - endWatch.since >= END_IDLE) finish("still-at-buffer-end");
+  }
+  setInterval(checkFinish, 500);   // timeupdate stops when playback stalls, so poll as well
+  function finish(via) {
+    if (!session || session.tok !== token || session.finished || loading) return;
+    session.finished = true;
+    lastFinish = via;
+    clearTimeout(stallTimer);
+    var e = engine.endInfo() || {};
+    SC.log("track finished", session.track.id, "via=" + via, "t=" + audio.currentTime.toFixed(2),
+      "dur=" + audio.duration, "bufEnd=" + (e.bufEnd || 0).toFixed(2), "ms=" + e.ms, "ended=" + audio.ended);
+    if (state.repeat === "one") { load(pos); return; }   // a fresh load: never append to a finished stream
+    next(true);
+  }
 
   function duration() {
     var d = audio.duration;
@@ -280,10 +336,12 @@
   var player = SC.player = {
     audio: audio,
     state: state,
-    // Replace the queue and play tracks[start]. opts.shuffle forces shuffle on.
+    // Replace the queue and play tracks[start]. opts.shuffle forces shuffle on; opts.from is
+    // the playlist/album/station it came from (kept as recently played).
     playList: function (tracks, start, opts) {
       opts = opts || {};
       if (!supported) { unsupported(); return; }
+      if (opts.from) rememberSet(opts.from);
       items = tracks.slice();
       if (opts.shuffle) { state.shuffle = true; saveSettings(); start = Math.floor(Math.random() * items.length); }
       failStreak = 0;
@@ -303,11 +361,12 @@
     supported: supported,
     play: function () {
       if (!current || !engine.active()) return;
+      userPaused = false;
       var pr = audio.play(); if (pr && pr.catch) pr.catch(function () { /* surfaced by error event */ });
     },
-    pause: function () { audio.pause(); },
-    toggle: function () { if (!current) return; if (audio.paused) player.play(); else audio.pause(); },
-    stop: function () { audio.pause(); seek(0); },
+    pause: function () { userPaused = true; audio.pause(); },
+    toggle: function () { if (!current) return; if (audio.paused) player.play(); else player.pause(); },
+    stop: function () { player.pause(); seek(0); },
     seek: seek,
     seekBy: function (d) { seek(audio.currentTime + d); },
     toggleShuffle: function () {
@@ -342,8 +401,11 @@
     time: function () { return { cur: audio.currentTime, dur: duration() }; },
     upNext: function () { return pos >= 0 && pos < order.length - 1 ? items[order[pos + 1]] : null; },
     debugInfo: function () {
+      var e = engine.endInfo() || {};
       return { id: current && current.id, preset: session && session.preset, t: +audio.currentTime.toFixed(1),
-        paused: audio.paused, pos: pos, len: order.length, ready: audio.readyState, buf: engine.bufferedSeconds(), loads: opens };
+        paused: audio.paused, pos: pos, len: order.length, ready: audio.readyState, buf: engine.bufferedSeconds(), loads: opens,
+        dur: +(+audio.duration).toFixed(2), bufEnd: +(e.bufEnd || 0).toFixed(2), all: !!e.all, ms: e.ms || "",
+        ended: audio.ended, fin: lastFinish };
     },
     _forcePreset: function (p) { forcePreset = p || ""; }
   };

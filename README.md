@@ -12,11 +12,11 @@ browse, search, queue and listen from the couch.
 
 ## Features
 
-- **Home:** trending tracks, SoundCloud's curated selections, what you played recently and more
-  like your last track.
-- **Search:** tracks, artists, playlists and albums, with your recent searches.
-- **Your profile, without logging in:** type your SoundCloud username once to get your public
-  likes, playlists and tracks.
+- **Home:** the tracks and playlists you played recently, trending tracks, SoundCloud's curated
+  selections and more like your last track.
+- **Search:** tracks, playlists, albums and artists, with your recent searches.
+- **Your profiles, without logging in:** add one or more SoundCloud accounts by name or link to
+  get their public likes, playlists and tracks, stacked in the order you choose.
 - **Playback:** a queue with shuffle and repeat, seeking, and autoplay of similar tracks when the
   queue ends. A mini-player stays on screen while you browse.
 - **Made for the remote:** arrows, OK and Back everywhere, the media keys, and the Magic Remote
@@ -63,8 +63,14 @@ expires, so keep the session extended.
 | Red | Open or close Now playing |
 | Pointer and wheel | Point to focus, click to select, scroll rows |
 
-Search opens the TV's own keyboard. Volume is the TV's. Your username, recent searches, recently
-played and settings are kept on the TV only.
+Search opens the TV's own keyboard. Volume is the TV's.
+
+To add a profile, open **Profile → Add a profile** and type a name, a username or a
+`soundcloud.com/...` link; matching accounts appear as you type, and OK on one adds it. Each
+profile has **Move up**, **Move down** and **Remove** buttons next to its name.
+
+Your profiles, recent searches, recently played tracks and playlists, and settings are kept on
+the TV only.
 
 ## Build
 
