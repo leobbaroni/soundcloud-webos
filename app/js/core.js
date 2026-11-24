@@ -212,13 +212,31 @@
         if (en.isIntersecting || en.intersectionRatio > 0) {
           var img = en.target;
           io.unobserve(img);
-          if (img.getAttribute("data-src")) { img.src = img.getAttribute("data-src"); img.removeAttribute("data-src"); }
+          if (img.getAttribute("data-src")) { img.src = img.getAttribute("data-src"); img.removeAttribute("data-src"); keep(img); }
         }
       });
     }, { rootMargin: "200px" });
   }
   var BLANK = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
   SC.BLANK = BLANK;
+  // Decoded artwork is the app's biggest memory cost on a 1 GB TV, and a list of thousands of
+  // likes would keep every picture it scrolled past. Only the newest MAX_ART lazy images stay
+  // loaded: older ones that are well off screen go back to waiting for the observer.
+  var MAX_ART = 160, live = [];
+  function keep(img) {
+    live.push(img);
+    var tries = Math.min(live.length, 40);
+    while (live.length > MAX_ART && tries-- > 0) {
+      var old = live.shift(), src = old.getAttribute("src") || "";
+      if (!document.body.contains(old) || old.getAttribute("data-src") || src.indexOf("data:") === 0) continue;
+      var r = old.getBoundingClientRect(), w = window.innerWidth, h = window.innerHeight;
+      var far = !(r.width || r.height) || r.bottom < -h || r.top > 2 * h || r.right < -w || r.left > 2 * w;
+      if (!far) { live.push(old); continue; }
+      old.setAttribute("data-src", src);
+      old.src = BLANK;
+      io.observe(old);
+    }
+  }
   SC.img = function (url, cls, eager) {
     var img = document.createElement("img");
     img.className = cls || "";

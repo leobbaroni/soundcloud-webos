@@ -238,3 +238,21 @@ and webOS versions are untested.
 1.3.0 was run there too: the full self-test including `natural-end` (two tracks in a row left to
 finish, the next one starting by itself each time, detected by `via=duration`), adding a profile by
 name search, and the Home rows refreshing without a restart.
+
+1.4.0 was run there against an account with 4,286 likes: `ST PROFILE-FULL OK likes=4054/4286
+playlists=3/11 desc=true pages=23`, the rest of the self-test, and a walk down the full likes list.
+
+## Long lists on a 1 GB TV
+
+Measured on the TV while walking down a likes list of 1,700 rows:
+
+- **Moving focus.** In a list (`.tlist`) or a row of cards (`[data-scroll="x"]`) `nav.move` goes
+  straight to the next sibling; only at the ends does it fall back to the spatial search, and then
+  it leaves the list's own items out. `restY` walks out from the focused row to its neighbours
+  and stops at the first one outside the window. A press costs about 11 ms at 40 rows and 30 to
+  40 ms at 1,700; before, every press measured every focusable and every row.
+- **Artwork.** List rows use the 100 px artwork (`large`), not 300 px. `core.js` keeps only the
+  newest 160 lazy images loaded: older ones well off screen go back to waiting for the observer.
+  After 1,728 rows, 159 list images were loaded (901 before the cap).
+- Rows are still added to the DOM as you go down and never removed (about 8 nodes a row).
+

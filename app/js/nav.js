@@ -18,12 +18,13 @@
     for (var i = 0; i < s.length; i++) if (s[i] && s[i].contains(el)) return s[i];
     return null;
   }
-  function candidates() {
+  // skip: a list or row whose own items are already ruled out (not measured at all)
+  function candidates(skip) {
     var out = [];
     scopesFn().forEach(function (s) {
       if (!s) return;
       var l = s.querySelectorAll(".focusable");
-      for (var i = 0; i < l.length; i++) if (!l[i].classList.contains("disabled") && visible(l[i])) out.push(l[i]);
+      for (var i = 0; i < l.length; i++) if (l[i].parentNode !== skip && !l[i].classList.contains("disabled") && visible(l[i])) out.push(l[i]);
     });
     return out;
   }
@@ -81,14 +82,23 @@
     var max = Math.max(0, contentExtent(n, "y") - view);
     base = Math.max(0, Math.min(base, max));
     var T = blockOf(target, n), lo = T.top - 2 * view, hi = T.bottom + 2 * view;
-    var all = n.querySelectorAll(".vis"), blocks = [], i;
-    for (i = 0; i < all.length; i++) {
-      var b = all[i];
-      if (!b.offsetHeight || b === target || b.contains(target) || target.contains(b)) continue;
-      var top = offsetWithin(b, n, "y");
-      if (top > hi || top + b.offsetHeight < lo) continue;
-      blocks.push(blockOf(b, n));
+    var all = n.querySelectorAll(".vis"), blocks = [], i, b, top;
+    // In a long list (thousands of likes) only the target's neighbours can be near the edges:
+    // walk out from it and stop at the first one outside the window, so the cost of a key
+    // press does not grow with the list. Blocks elsewhere in the scroller are few.
+    var P = target.parentNode, near = P !== n && P.children.length > 60;
+    function take(x) {
+      if (!x.offsetHeight || x === target || x.contains(target) || target.contains(x)) return true;
+      top = offsetWithin(x, n, "y");
+      if (top > hi || top + x.offsetHeight < lo) return false;
+      blocks.push(blockOf(x, n));
+      return true;
     }
+    if (near) {
+      for (b = target.previousElementSibling; b; b = b.previousElementSibling) if (b.classList.contains("vis") && !take(b)) break;
+      for (b = target.nextElementSibling; b; b = b.nextElementSibling) if (b.classList.contains("vis") && !take(b)) break;
+    }
+    for (i = 0; i < all.length; i++) if (!near || all[i].parentNode !== P) take(all[i]);
     // -1: not allowed; otherwise the penalty for this offset
     function cost(s) {
       var e = s + view, gap = T.top - s, k, x, pen = 0;
@@ -169,11 +179,21 @@
   function move(dir) {
     if (!cur || !SC.inDoc(cur) || !visible(cur)) { focusFirst(); return true; }
     if (cur._key && cur._key(dir)) return true;
+    // In a list or a row of cards the neighbour in line is the answer: no need to measure every
+    // focusable on the screen (a 4,000-row list made each press slower than the last).
+    var par = cur.parentNode;
+    var line = !par || !par.classList ? "" : par.classList.contains("tlist") ? "y" : par.getAttribute("data-scroll") === "x" ? "x" : "";
+    if (line === "y" ? dir === "up" || dir === "down" : line === "x" && (dir === "left" || dir === "right")) {
+      var fwd = dir === "down" || dir === "right", sib = cur;
+      do { sib = fwd ? sib.nextElementSibling : sib.previousElementSibling; }
+      while (sib && !(sib.classList.contains("focusable") && !sib.classList.contains("disabled") && sib.offsetParent));
+      if (sib) { focus(sib); return true; }
+    } else par = null;   // moving across the line: its other items are candidates
     var c = cur.getBoundingClientRect(), cc = center(c);
     var best = null, bestScore = Infinity, tol = 12;
     // Stay in the current scope while it has something in that direction (a row scrolled out
     // of view below must win over the mini-player that covers it); else cross to another.
-    var here = scopeOf(cur), all = candidates();
+    var here = scopeOf(cur), all = candidates(par);
     pick(all.filter(function (e) { return scopeOf(e) === here; }));
     if (!best) pick(all);
     if (!best) return false;

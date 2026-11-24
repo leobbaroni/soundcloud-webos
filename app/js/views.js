@@ -192,7 +192,7 @@
     var r = el("div", "trow focusable vis");
     if (t.tc && !t.playable) r.className += " unavailable";
     r.appendChild(el("span", "trow-n", n !== null ? String(n) : ""));
-    r.appendChild(SC.img(SC.art(t.artwork, "t300x300"), "trow-img"));
+    r.appendChild(SC.img(SC.art(t.artwork, "large"), "trow-img"));
     var mid = el("div", "trow-mid");
     mid.appendChild(el("div", "trow-title", t.title || "Loading…"));
     var sub = trackSub(t);
@@ -929,7 +929,7 @@
     }
     function acctRow(u, linked) {
       var r = el("div", "acct focusable vis");
-      r.appendChild(SC.img(SC.art(u.avatar, "t300x300"), "acct-row-img"));
+      r.appendChild(SC.img(SC.art(u.avatar, "large"), "acct-row-img"));
       var mid = el("div", "acct-mid");
       mid.appendChild(el("div", "acct-row-name", u.username || u.permalink));
       var meta = ["@" + u.permalink];
