@@ -11,13 +11,13 @@ Plain HTML/CSS/JS in `app/`, no frameworks, no build step, no npm dependencies.
 - **Screens:** Home (recently played tracks, recent playlists, trending, "more like" your last
   track, likes of the first profile, SoundCloud's curated selections), Search (tracks,
   playlists, albums, artists, in that order; recent searches), Playlist/Album/Station, Artist,
-  Your profiles (each linked account's likes, playlists and albums, and tracks, stacked in list
-  order), Add a profile, Queue, Settings, and Now playing. A mini-player along the bottom shows
-  what's on while you browse.
+  Your profiles (each linked account's likes, playlists and albums, liked playlists, and tracks,
+  stacked in list order), See all (one of those collections, whole), Add a profile, Queue,
+  Settings, and Now playing. A mini-player along the bottom shows what's on while you browse.
 - **Profiles:** "Add a profile" searches `/search/users` as you type (0.6 s debounce); text that
   looks like a link, or a single word, is also tried with `/resolve` and shown first when it is
-  an account. Each account header has Move up / Move down / Remove (Remove asks first). Rows
-  load one account at a time, in list order.
+  an account. Each account header has Shuffle likes / Move up / Move down / Remove (Remove asks
+  first). Rows load one account at a time, in list order. See "Profiles: whole collections".
 - **Remote:** arrows move, OK selects, Back goes up a screen (on Home it asks before exiting).
   Play/Pause/Stop work; FF/RW seek 15 s; on Now playing, Left/Right on the progress bar seek
   10 s. Red opens or closes Now playing. Next/Previous-track keys work when the remote sends
@@ -87,7 +87,7 @@ and otherwise the queue advances (shuffle order, repeat-all, then autoplay). The
 | `app/css/app.css` | 10-foot dark theme, focus states (Chromium 53-safe CSS) |
 | `app/js/config.js` | Build settings: debug beacon, debug host, self-test button (all off) |
 | `app/js/core.js` | Storage, debug log/beacon, DOM helpers (`SC.text` display-text normaliser), lazy images, toasts |
-| `app/js/api.js` | api-v2 client: client id, endpoints, data normalisation |
+| `app/js/api.js` | api-v2 client: client id, endpoints, data normalisation, paging, profile data kept for the session |
 | `app/js/nav.js` | Spatial focus for the remote, pointer, transform-based scrolling (see "Scrolling") |
 | `app/js/hls.js` | fMP4 HLS through MediaSource |
 | `app/js/player.js` | Queue, shuffle/repeat, autoplay, load gating, watchdogs, end-of-track detection |
@@ -111,6 +111,53 @@ at the bottom.
 Spatial focus stays inside the current area (rail, screen, mini-player) while that area has
 something in the pressed direction. A row scrolled below the fold is reached before the
 mini-player that covers it.
+
+## Profiles: whole collections
+
+Up to 1.3.0 a profile showed one page of each collection (40 likes, 20 playlists) and dropped
+likes that can't play here, so most of a long like list never showed. Since 1.4.0 it reads all
+of it.
+
+- **Paging.** `api.pager` follows `next_href` until there is none. The server returns fewer
+  items than the `limit` asked (it leaves out tracks that were removed or made private: 186 of
+  200, then 185), so a short page is not the end; only a missing `next_href` is. Pages are asked
+  with `limit=200`; items are de-duplicated by kind and id; a collection stops at 5,000 items
+  (playlists at 500) or 100 pages. `more()` reads one page, `all()` reads to the end.
+- **Collections:** Likes (`/track_likes`, `likes_count`), Playlists (`/playlists_without_albums`
+  then `/albums`, one list, read whole before it shows; `playlist_count`), Liked playlists
+  (`/playlist_likes`, `playlist_likes_count`) and Tracks (`/tracks`, `track_count`). Playlists are
+  kept without their track lists; their screen fetches the playlist again.
+- **Order, newest first:** likes by the date of the like, playlists by `last_modified` (else
+  `created_at`), tracks by `created_at`. The server already sends likes in that order; the list is
+  sorted again after every page anyway (a stable sort, undated items last).
+- **Nothing hidden:** likes that can't play here (DRM-only, blocked) stay in the rows and lists,
+  marked "Not available on TV", and playback skips them as before. Home's "Liked by" row is the
+  first page of likes, shown the same way.
+- **Rows:** the title carries the account's total ("Likes · 395"; with no count from SoundCloud,
+  the number loaded so far and "+" while more pages exist). 20 cards at first, 20 more whenever
+  focus comes within 6 of the last one, the next page fetched when the loaded items run out
+  (a spinner card shows meanwhile), and at most 150 cards a row (about 1,500 DOM nodes). Cards
+  are only inserted before the end, so focus stays put. A "See all" card ends the row, and the account
+  header has "All likes" so the full list is one press away.
+- **See all** (`screens.collection`): likes and tracks are a track list that renders 40 rows at
+  a time and asks for the next page when they are all shown; playlists are cards five to a
+  line. Both reach the last item. The header says how many SoundCloud counts and, once all is
+  read, how many of those are private or removed.
+- **Play, Shuffle, Shuffle likes** read the remaining pages first, with the progress on the
+  button ("Loading likes 186/395..."), then queue the whole collection. The queue has no cap of
+  its own; the 5,000-item cap above bounds it.
+- **Private playlists:** `playlist_count` includes private playlists, which the API never returns
+  without a login. When it is larger than what was read, the account shows "1 private playlist
+  can't be shown without logging in."
+- **Cache:** an account's pages are kept in memory (`api.account`, never localStorage) for the
+  session, so coming back to Profile is instant. When Profile is opened, or shown again, more
+  than 5 minutes after an account was read, that account's rows are read again (not the one
+  focus returns to). Removing a profile drops its data.
+
+Tested against the account `z.arc_` (likes_count 395, playlist_count 3): three requests read
+371 likes (the other 24 are removed or private tracks the server leaves out), all newest first,
+18 of them marked "Not available on TV"; Playlists shows the 2 public ones and "1 private
+playlist".
 
 ## Fancy titles, symbols and emoji
 
@@ -138,8 +185,8 @@ mathematical alphabets to plain letters, so it is not needed.
 ## Build and install
 
 ```sh
-python build.py                                  # build/local.soundcloud.tv_1.3.0_all.ipk
-python build.py --debug http://<pc-ip>:<port>    # build/local.soundcloud.tv_1.3.0_all-debug.ipk
+python build.py                                  # build/local.soundcloud.tv_1.4.0_all.ipk
+python build.py --debug http://<pc-ip>:<port>    # build/local.soundcloud.tv_1.4.0_all-debug.ipk
 ```
 
 The release package ships with the beacon off, an empty debug host and no `selftest.js`. The
@@ -151,7 +198,12 @@ to run just those). A release build can also log if `localStorage.sc_debug` and
 `localStorage.sc_debug_host` are set.
 
 Self-test steps, in order: `home`, `keys`, `search`, `playlist`, `play5s`, `switch5`, `rapid`,
-`seekkeys`, `aac96`, `autoplay`, `natural-end`, `nowplaying`, `profile-api`, `back-home`.
+`seekkeys`, `aac96`, `autoplay`, `natural-end`, `nowplaying`, `profile-api`, `profile-full`,
+`back-home`. `profile-full` reads every like of the first linked profile (or the account
+`z.arc_` when none is linked) through `api.pager`, plus the account and its playlists, and
+reports `ST PROFILE-FULL OK likes=<loaded>/<likes_count> playlists=<loaded>/<playlist_count>
+desc=<true|false> pages=<n>` with the number missing. It fails when the likes are out of date
+order, or when more than a tenth of `likes_count` (at least 3) is missing.
 `natural-end` plays three normal-length tracks from a "lofi chill" playlist. It buffers each
 track's tail (seeks to 90 s before the end and waits for every segment), then seeks inside the
 buffer to 6 s before the end and lets the track finish by itself. The next queue item must
@@ -168,7 +220,8 @@ Mode, copy the `.ipk` to `/tmp` on the TV and run
 These work with just `client_id`, which is read from `m.soundcloud.com`'s HTML and
 refreshed on 401/403: `/search/tracks`, `/search/playlists_without_albums`,
 `/search/albums`, `/search/users`, `/resolve`, `/users/{id}`, `/users/{id}/tracks`,
-`/toptracks`, `/likes`, `/playlists_without_albums`, `/albums`, `/playlists/{id}`,
+`/toptracks`, `/track_likes`, `/playlist_likes`, `/playlists_without_albums`, `/albums`,
+`/playlists/{id}`,
 `/system-playlists/{urn}`, `/tracks?ids=` (50 per call), `/tracks/{id}/related`,
 `/charts?kind=trending&genre=soundcloud:genres:all-music`, `/mixed-selections`, and the
 transcoding URL with `track_authorization`. `kind=top` charts, genre charts, `/discover/sets`

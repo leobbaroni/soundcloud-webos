@@ -16,7 +16,9 @@ browse, search, queue and listen from the couch.
   selections and more like your last track.
 - **Search:** tracks, playlists, albums and artists, with your recent searches.
 - **Your profiles, without logging in:** add one or more SoundCloud accounts by name or link to
-  get their public likes, playlists and tracks, stacked in the order you choose.
+  get their public likes, playlists and tracks, stacked in the order you choose. All of them,
+  newest first: rows grow as you scroll, and "See all" opens the whole list down to the very
+  first like.
 - **Playback:** a queue with shuffle and repeat, seeking, and autoplay of similar tracks when the
   queue ends. A mini-player stays on screen while you browse.
 - **Made for the remote:** arrows, OK and Back everywhere, the media keys, and the Magic Remote
@@ -67,10 +69,15 @@ Search opens the TV's own keyboard. Volume is the TV's.
 
 To add a profile, open **Profile → Add a profile** and type a name, a username or a
 `soundcloud.com/...` link; matching accounts appear as you type, and OK on one adds it. Each
-profile has **Move up**, **Move down** and **Remove** buttons next to its name.
+profile has **Shuffle likes**, **Move up**, **Move down** and **Remove** buttons next to its
+name. Its rows show the account's totals ("Likes · 395") and end with **See all**, a full list
+with Play and Shuffle for the whole collection. Likes that can't play on the TV are still
+listed, marked "Not available on TV", and skipped when playing. Private playlists and tracks
+SoundCloud has removed can't be shown; the profile says how many playlists are private.
 
 Your profiles, recent searches, recently played tracks and playlists, and settings are kept on
-the TV only.
+the TV only. A profile's likes and playlists are kept in memory while the app is open and read
+again when you come back to Profile after five minutes.
 
 ## Build
 

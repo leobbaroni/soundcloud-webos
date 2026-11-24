@@ -60,7 +60,8 @@
       var play = el("div", "card-play");
       play.appendChild(SC.icon("play"));
       art.appendChild(play);
-      if (item.preview) art.appendChild(el("span", "badge", "Preview"));
+      if (item.tc && !item.playable) { c.className += " unavailable"; art.appendChild(el("span", "badge", "Not available on TV")); }
+      else if (item.preview) art.appendChild(el("span", "badge", "Preview"));
     } else if (item.kind === "playlist") {
       art.appendChild(el("span", "badge", item.system ? "Station" : item.isAlbum ? "Album" : SC.plural(item.trackCount || 0, "track", "tracks")));
     }
@@ -114,6 +115,77 @@
     };
   }
 
+  // "Likes · 395"; with no count from SoundCloud, what has loaded so far, "+" while more pages exist.
+  function countTitle(title, total, pg) {
+    if (typeof total === "number" && total >= 0) return title + " · " + total;
+    return title + " · " + pg.items.length + (pg.done ? "" : "+");
+  }
+
+  // A row read from a pager (api.pager): ROW_STEP more cards are added as focus comes within
+  // ROW_AHEAD of the last one, the next page is fetched when the loaded items run out, and
+  // the row stops at ROW_CAP cards (about 1,500 nodes; the rest is one press away on "See
+  // all"). Cards only ever go in before the end, so focus stays where it is.
+  // opts: total (the account's count, or null), seeAll (action of the "See all" cards).
+  var ROW_CAP = 150, ROW_STEP = 20, ROW_AHEAD = 6;
+  function pagedRow(title, pg, opts) {
+    var r = row(countTitle(title, opts.total, pg), []);
+    var head = r.querySelector(".row-title"), track = r.querySelector(".row-track");
+    var tracks = [], seen = {}, used = 0, shown = 0, fetching = false;
+    function more() {
+      var c = el("div", "card card-more");
+      var art = el("div", "card-art");
+      var face = el("div", "more-face");
+      face.appendChild(SC.icon("queue"));
+      art.appendChild(face);
+      c.appendChild(art);
+      c.appendChild(el("div", "card-title", "See all" + (typeof opts.total === "number" ? " " + opts.total : "")));
+      c.appendChild(el("div", "card-sub", "Full list"));
+      nav.bind(c, opts.seeAll);
+      return c;
+    }
+    var last = more();
+    var loader = el("div", "card card-loading");
+    var spin = el("div", "card-art");
+    spin.appendChild(el("div", "spin"));
+    loader.appendChild(spin);
+    track.appendChild(loader);
+    track.appendChild(last);
+    function fill() {
+      var items = pg.items, added = 0;
+      while (used < items.length && shown < ROW_CAP && added < ROW_STEP) {
+        var it = items[used++], k = it.kind + ":" + it.id;
+        if (seen[k]) continue;
+        seen[k] = 1;
+        if (it.kind === "track") tracks.push(it);
+        track.insertBefore(card(it, { tracks: tracks, index: it.kind === "track" ? tracks.length - 1 : -1 }), loader);
+        shown++; added++;
+      }
+      loader.style.display = shown < ROW_CAP && (used < items.length || !pg.done) ? "" : "none";
+      head.textContent = SC.text(countTitle(title, opts.total, pg));
+      var f = nav.current();
+      if (f && f.parentNode === track) nav.ensureVisible(f, "x");
+    }
+    function grow() {
+      if (shown >= ROW_CAP) return;
+      if (used < pg.items.length) { fill(); return; }
+      if (pg.done || fetching) return;
+      fetching = true;
+      pg.more().then(function () { fetching = false; fill(); }, function (e) {
+        fetching = false;
+        loader.style.display = "none";
+        SC.log("row page failed", title, e.message);
+      });
+    }
+    function onFocus(f) {
+      if (!SC.inDoc(r)) { SC.off("nav:focus", onFocus); return; }
+      if (f.parentNode !== track || f === last) return;
+      if (Array.prototype.indexOf.call(track.children, f) >= shown - ROW_AHEAD) grow();
+    }
+    SC.on("nav:focus", onFocus);
+    fill();
+    return r;
+  }
+
   // ---------- vertical track list (playlist, likes, queue) ----------
   function trackRow(t, n, onOk, opts) {
     opts = opts || {};
@@ -142,13 +214,28 @@
 
   // A list that hydrates stub tracks and appends 40 rows at a time as focus nears the end.
   // opts.from: the playlist the tracks belong to (recorded as recently played on play).
+  // opts.more: when every row of `all` is shown, called to add more tracks to `all` (the next
+  // page); returns a promise, or null when there is nothing more.
   function trackList(all, opts) {
     opts = opts || {};
     var box = el("div", "tlist");
     var rendered = 0, busy = false, PAGE = 40;
     function playFrom(i) { SC.player.playList(all, i, { from: opts.from }); }
+    function fetchMore() {
+      var m = opts.more && opts.more();
+      if (!m) return Promise.resolve();
+      busy = true;
+      var wait = spinner("Loading more…");
+      box.appendChild(wait);
+      return m.then(function () {
+        box.removeChild(wait);
+        busy = false;
+        return rendered < all.length ? renderMore() : null;
+      }, function (e) { box.removeChild(wait); busy = false; SC.log("list page failed", e.message); });
+    }
     function renderMore() {
-      if (busy || rendered >= all.length) return Promise.resolve();
+      if (busy) return Promise.resolve();
+      if (rendered >= all.length) return fetchMore();
       busy = true;
       var end = Math.min(all.length, rendered + PAGE);
       var stubIds = [];
@@ -279,9 +366,9 @@
         });
       }
       if (profile) {
+        // the newest likes only (the full list is on Profile); unplayable ones marked as there
         add("likes", api.userLikes(profile.id, 30), function (pg) {
-          var t = pg.items.filter(function (x) { return x.kind === "track" && x.playable; });
-          return t.length ? row("Liked by " + profile.name, t) : null;
+          return pg.items.length ? row("Liked by " + profile.name, pg.items) : null;
         });
       }
       var mixed = api.mixedSelections().catch(function () { return []; });
@@ -504,6 +591,24 @@
 
   // ---------- Your profiles: the linked accounts, stacked in list order ----------
   var justAdded = 0;   // set by "Add a profile" so the Profile screen focuses the new account
+  var STALE = 5 * 60 * 1000;   // a profile's rows are read again when shown after this long
+
+  // Act on a whole collection (play, shuffle): the pages not read yet are fetched first, with
+  // the progress on the button pressed ("Loading likes 186/395…").
+  function whole(pg, btn, noun, total, then) {
+    if (pg.done) { then(pg.items); return; }
+    if (btn._busy) return;
+    btn._busy = true;
+    var lab = btn.querySelector(".btn-label"), was = lab.textContent;
+    function show() { lab.textContent = SC.text("Loading " + noun + " " + pg.items.length + (typeof total === "number" ? "/" + total : "") + "…"); }
+    show();
+    pg.all(show).then(function () {
+      lab.textContent = was; btn._busy = false;
+      SC.log("whole " + noun, "loaded=" + pg.items.length, "pages=" + pg.pages);
+      then(pg.items);
+    }, function (e) { lab.textContent = was; btn._busy = false; SC.toast(errText(e)); });
+  }
+
   screens.profile = function () {
     var p = page("profile");
     var head = el("div", "page-head vis");
@@ -532,12 +637,20 @@
       info.appendChild(el("div", "acct-sub", "@" + pr.permalink));
       h.appendChild(info);
       var acts = el("div", "acct-actions");
-      sec._shuffle = button("Shuffle likes", "shuffle", function () { SC.player.playList(sec._liked, 0, { shuffle: true }); }, "small");
+      sec._shuffle = button("Shuffle likes", "shuffle", function () {
+        var a = api.account(pr.id);
+        whole(a.likes, sec._shuffle, "likes", sec._likesTotal, function (all) { SC.player.playList(all, 0, { shuffle: true }); });
+      }, "small");
       sec._shuffle.style.display = "none";
+      // the row's own "See all" card sits after its last card, up to 150 cards away
+      sec._all = button("All likes", "queue", function () {
+        go("collection", { profile: pr, kind: "likes", total: sec._likesTotal });
+      }, "small");
+      sec._all.style.display = "none";
       sec._up = button("Move up", "up", function () { move(sec, -1); }, "small");
       sec._down = button("Move down", "down", function () { move(sec, 1); }, "small");
       sec._rm = button("Remove", "clear", function () { confirmRemove(sec); }, "small");
-      acts.appendChild(sec._shuffle); acts.appendChild(sec._up); acts.appendChild(sec._down); acts.appendChild(sec._rm);
+      acts.appendChild(sec._shuffle); acts.appendChild(sec._all); acts.appendChild(sec._up); acts.appendChild(sec._down); acts.appendChild(sec._rm);
       h.appendChild(acts);
       sec.appendChild(h);
       sec._rows = el("div", "acct-rows");
@@ -546,37 +659,50 @@
       return sec;
     }
 
-    // An account's rows: likes, playlists (albums too), tracks. Fetched for one account at a
-    // time, in list order, so a long list never fires a burst of requests.
-    function loadAccount(sec) {
-      var pr = sec._profile, box = sec._rows;
+    // An account's rows: likes, playlists (albums too), liked playlists, tracks, each with the
+    // account's total and a "See all". Fetched for one account at a time, in list order, so a
+    // long list never fires a burst of requests. The data is kept for the session
+    // (api.account): coming back is instant, and it is read again once older than STALE.
+    function loadAccount(sec, maxAge) {
+      var pr = sec._profile, box = sec._rows, a = api.account(pr.id, maxAge);
       sec._state = "loading";
       SC.clear(box);
       box.appendChild(spinner("Loading " + (pr.name || pr.permalink) + "…"));
-      function soft(promise) { return promise.catch(function (e) { return { items: [], err: e }; }); }
+      function soft(promise) { return promise.catch(function (e) { return { err: e }; }); }
+      function first(pg) { return pg.pages ? Promise.resolve(0) : pg.more(); }
       return Promise.all([
-        soft(api.userLikes(pr.id, 40)), soft(api.userPlaylists(pr.id, 20)),
-        soft(api.userAlbums(pr.id, 20)), soft(api.userTracks(pr.id, 30))
+        soft(a.info()), soft(first(a.likes)), soft(a.sets.all()), soft(first(a.likedSets)), soft(first(a.tracks))
       ]).then(function (r) {
         SC.clear(box);
-        var likes = r[0].items.filter(function (x) { return x.kind === "playlist" || (x.kind === "track" && x.playable); });
-        var sets = r[1].items.concat(r[2].items);
-        var own = api.onlyPlayable(r[3].items);
-        sec._liked = likes.filter(function (x) { return x.kind === "track"; });
-        sec._shuffle.style.display = sec._liked.length ? "" : "none";
-        if (likes.length) box.appendChild(row("Likes", likes));
-        if (sets.length) box.appendChild(row("Playlists", sets));
-        if (own.length) box.appendChild(row("Tracks", own));
-        var failed = r.filter(function (x) { return x.err; });
+        var user = r[0].err ? {} : r[0];
+        function add(name, pg, total, kind) {
+          if (!pg.items.length) return null;
+          return box.appendChild(pagedRow(name, pg, { total: typeof total === "number" ? total : null,
+            seeAll: function () { go("collection", { profile: pr, kind: kind, total: total }); } }));
+        }
+        sec._likesTotal = user.likesCount;
+        sec._shuffle.style.display = sec._all.style.display = a.likes.items.length ? "" : "none";
+        add("Likes", a.likes, user.likesCount, "likes");
+        add("Playlists", a.sets, user.playlistCount, "sets");
+        // playlist_count includes private ones, which the public API never returns
+        var hidden = typeof user.playlistCount === "number" && a.sets.done ? user.playlistCount - a.sets.items.length : 0;
+        if (hidden > 0) {
+          box.appendChild(el("p", "note vis", (hidden === 1 ? "1 private playlist" : hidden + " private playlists") + " can't be shown without logging in."));
+        }
+        add("Liked playlists", a.likedSets, user.playlistLikesCount, "likedSets");
+        add("Tracks", a.tracks, user.trackCount, "tracks");
+        var failed = r.filter(function (x) { return x && x.err; });
         if (!box.firstChild && failed.length === r.length) {
           sec._state = "error";
-          box.appendChild(message(errText(failed[0].err), function () { loadAccount(sec); }));
+          box.appendChild(message(errText(failed[0].err), function () { loadAccount(sec, 1); }));
         } else {
           sec._state = "done";
           if (!box.firstChild) box.appendChild(el("p", "note vis", "Nothing public on this profile. Likes, playlists and tracks must be public to show here."));
         }
-        SC.log("profile rows", pr.permalink, "likes=" + likes.length, "playlists=" + sets.length, "tracks=" + own.length, "errors=" + failed.length);
-        SC.emit("profile:ready", { id: pr.id, likes: likes.length, playlists: sets.length, tracks: own.length });
+        var counts = { id: pr.id, likes: a.likes.items.length, likesTotal: user.likesCount, playlists: a.sets.items.length,
+          playlistsTotal: user.playlistCount, hidden: hidden, likedSets: a.likedSets.items.length, tracks: a.tracks.items.length };
+        SC.log("profile rows", pr.permalink, counts, "errors=" + failed.length);
+        SC.emit("profile:ready", counts);
       });
     }
     function pump() {
@@ -585,7 +711,7 @@
       for (var i = 0; i < order.length && !sec; i++) if (sections[order[i].id] && !sections[order[i].id]._state) sec = sections[order[i].id];
       if (!sec) return;
       busy = true;
-      loadAccount(sec).then(function () { busy = false; pump(); });
+      loadAccount(sec, STALE).then(function () { busy = false; pump(); });
     }
 
     function updateMoves() {
@@ -614,7 +740,7 @@
       pump();
     }
     function firstButton(sec) {
-      var b = [sec._shuffle, sec._up, sec._down, sec._rm].filter(function (x) { return x.style.display !== "none"; });
+      var b = [sec._shuffle, sec._all, sec._up, sec._down, sec._rm].filter(function (x) { return x.style.display !== "none"; });
       return b[0];
     }
 
@@ -639,6 +765,7 @@
       var pr = sec._profile, idx = 0;
       SC.profiles.list().forEach(function (x, i) { if (x.id === pr.id) idx = i; });
       SC.profiles.remove(pr.id);
+      api.forgetAccount(pr.id);
       delete sections[pr.id];
       if (sec.parentNode) sec.parentNode.removeChild(sec);
       updateMoves();
@@ -653,6 +780,12 @@
     return {
       el: p.el, scroller: p.scroller,
       onShow: function () {
+        // rows read more than STALE ago load again, except the account focus will return to
+        var back = p.el._last;
+        for (var id in sections) {
+          var s = sections[id];
+          if (sections.hasOwnProperty(id) && s._state === "done" && Date.now() - api.account(s._profile.id).ts > STALE && !(back && s.contains(back))) s._state = "";
+        }
         render();
         if (justAdded && sections[justAdded]) nav.focus(firstButton(sections[justAdded]));
         justAdded = 0;
@@ -660,6 +793,108 @@
       destroy: function () { dead = true; }
     };
   };
+
+  // ---------- See all: one collection of a linked profile, to its last item ----------
+  // Likes and tracks: a track list fed page by page as focus nears its end, with Play and
+  // Shuffle acting on the whole collection. Playlists: cards five to a line.
+  var COLLECTIONS = {
+    likes: { title: "Likes", one: "like", many: "likes", tracks: true },
+    tracks: { title: "Tracks", one: "track", many: "tracks", tracks: true },
+    sets: { title: "Playlists", one: "playlist", many: "playlists" },
+    likedSets: { title: "Liked playlists", one: "liked playlist", many: "liked playlists" }
+  };
+  screens.collection = function (params) {
+    var pr = params.profile, kind = COLLECTIONS[params.kind], pg = api.account(pr.id)[params.kind];
+    var total = typeof params.total === "number" ? params.total : null;
+    var p = page("collection");
+    var content = el("div");
+    p.body.appendChild(content);
+    var meta = null, dead = false;
+    function metaText() {
+      var n = pg.items.length;
+      if (total === null) return SC.plural(n, kind.one, kind.many) + (pg.done ? "" : "+");
+      if (!pg.done) return SC.plural(total, kind.one, kind.many) + " · " + n + " loaded";
+      return SC.plural(total, kind.one, kind.many) + (n < total ? " · " + (total - n) + " private or removed, not shown" : "");
+    }
+    function more() {
+      return pg.done ? null : pg.more().then(function () { if (meta) meta.textContent = SC.text(metaText()); });
+    }
+    function playAll(shuffle) {
+      return function (btn) {
+        whole(pg, btn, kind.many, total, function (all) {
+          if (meta) meta.textContent = SC.text(metaText());
+          SC.player.playList(all, 0, { shuffle: shuffle });
+        });
+      };
+    }
+    function load() {
+      SC.clear(content);
+      content.appendChild(spinner("Loading " + kind.many + "…"));
+      return (pg.pages ? Promise.resolve() : pg.more()).then(function () {
+        if (dead) return;
+        SC.clear(content);
+        var h = header({
+          art: pr.avatar, round: true, eyebrow: kind.title, title: pr.name || pr.permalink, byline: "@" + pr.permalink,
+          meta: metaText(),
+          actions: kind.tracks && pg.items.length ? [
+            { label: "Play", icon: "play", act: playAll(false) },
+            { label: "Shuffle", icon: "shuffle", act: playAll(true) }
+          ] : []
+        });
+        meta = h.querySelector(".hero-meta");
+        content.appendChild(h);
+        var list = null;
+        if (!pg.items.length) content.appendChild(message("Nothing public here."));
+        else if (kind.tracks) list = trackList(pg.items, { more: more });
+        else list = cardGrid(pg.items, { more: more });
+        if (list) content.appendChild(list);
+        return (list ? list._ready : Promise.resolve()).then(function () {
+          SC.log("collection open", params.kind, String(pr.id), "loaded=" + pg.items.length, "total=" + total);
+          SC.emit("collection:ready", { kind: params.kind, count: pg.items.length, list: list });
+          nav.focusFirst(p.el);
+        });
+      }, function (e) {
+        if (dead) return;
+        SC.clear(content);
+        content.appendChild(message(errText(e), load));
+        nav.focusFirst(p.el);
+      });
+    }
+    load();
+    return { el: p.el, scroller: p.scroller, destroy: function () { dead = true; } };
+  };
+
+  // Cards five to a line, each line a block for the vertical scroll; LINES more lines are added
+  // as focus reaches the last two. opts.more as in trackList.
+  function cardGrid(all, opts) {
+    var box = el("div", "cgrid");
+    var rendered = 0, busy = false, PER = 5, LINES = 6;
+    function renderMore() {
+      if (busy) return Promise.resolve();
+      if (rendered >= all.length) {
+        var m = opts.more && opts.more();
+        if (!m) return Promise.resolve();
+        busy = true;
+        return m.then(function () { busy = false; return rendered < all.length ? renderMore() : null; },
+          function (e) { busy = false; SC.log("grid page failed", e.message); });
+      }
+      var end = Math.min(all.length, rendered + PER * LINES), line = box.lastChild;
+      for (var i = rendered; i < end; i++) {
+        if (!line || line.children.length >= PER) { line = el("div", "cgrid-line vis"); box.appendChild(line); }
+        line.appendChild(card(all[i], { tracks: [], index: -1 }));
+      }
+      rendered = end;
+      return Promise.resolve();
+    }
+    function onFocus(f) {
+      if (!SC.inDoc(box)) { SC.off("nav:focus", onFocus); return; }
+      var line = f.parentNode;
+      if (line && line.parentNode === box && Array.prototype.indexOf.call(box.children, line) >= box.children.length - 2) renderMore();
+    }
+    SC.on("nav:focus", onFocus);
+    box._ready = renderMore();
+    return box;
+  }
 
   // ---------- Add a profile: search accounts as you type, or paste a profile link ----------
   screens.addprofile = function () {

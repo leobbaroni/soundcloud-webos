@@ -71,7 +71,8 @@
     return {
       kind: "user", id: u.id, username: u.username || "", avatar: u.avatar_url || "",
       permalink: u.permalink || "", followers: u.followers_count, trackCount: u.track_count,
-      playlistCount: u.playlist_count, likesCount: u.likes_count, city: u.city || "",
+      playlistCount: u.playlist_count, likesCount: u.likes_count, playlistLikesCount: u.playlist_likes_count,
+      city: u.city || "",
       country: u.country_code || "", fullName: u.full_name || ""
     };
   }
@@ -124,14 +125,113 @@
     if (item.playlist) return normPlaylist(item.playlist);
     return null;
   }
+  // When an entry dates from, in ms (0 when unknown): a like's own date for likes, the last
+  // change (else creation) for playlists, the upload for tracks.
+  function dateOf(item) {
+    var s = item.track || item.playlist ? item.created_at :
+      item.kind === "playlist" ? item.last_modified || item.created_at : item.created_at;
+    var t = s ? Date.parse(s) : 0;
+    return t > 0 ? t : 0;
+  }
   function collection(res) {
-    return ((res && res.collection) || []).map(norm).filter(function (x) { return !!x; });
+    return ((res && res.collection) || []).map(function (item) {
+      var x = norm(item);
+      if (x) x.at = dateOf(item);
+      return x;
+    }).filter(function (x) { return !!x; });
+  }
+  // Newest first, undated last, ties in their old order (V8 5.3's sort is not stable). In place,
+  // so screens holding the array keep seeing it. Returns true when the order changed.
+  function sortNewest(list) {
+    var d = list.map(function (x, i) { return { x: x, i: i, at: x.at || 0 }; }), moved = false;
+    d.sort(function (a, b) {
+      if (a.at !== b.at) return !a.at ? 1 : !b.at ? -1 : b.at - a.at;
+      return a.i - b.i;
+    });
+    for (var i = 0; i < d.length; i++) {
+      if (list[i] !== d[i].x) moved = true;
+      list[i] = d[i].x;
+    }
+    return moved;
   }
   function onlyPlayable(list) {
     return list.filter(function (t) { return t.kind !== "track" || t.stub || t.playable; });
   }
   function page(res) {
     return { items: collection(res), next: (res && res.next_href) || null };
+  }
+
+  // ---- whole collections: follow next_href to the end ----
+  // The server returns fewer items than the limit asked (it leaves out removed and private
+  // ones), so the only end marker is a missing next_href. sources: [[path, params], ...], read
+  // one after the other into one list (a profile's playlists, then its albums). Items are
+  // de-duplicated by kind and id, kept newest first, and capped (opts.cap, at most CAP).
+  // opts.lite drops a playlist's track list (its screen fetches the playlist again).
+  // pg.more() reads the next page and resolves with the number of items it added;
+  // pg.all(onPage) reads to the end. pg.items is one array, changed in place.
+  var CAP = 5000, PAGE_LIMIT = 200, MAX_PAGES = 100;
+  function pager(sources, opts) {
+    opts = opts || {};
+    var cap = Math.min(opts.cap || CAP, CAP), src = sources.slice(), next = null, seen = {}, busy = null;
+    var pg = { items: [], pages: 0, done: !src.length, resorted: false };
+    pg.more = function () {
+      if (pg.done) return Promise.resolve(0);
+      if (busy) return busy;
+      var url = next || src[0][0], params = next ? null : src[0][1];
+      busy = get(url, params).then(function (res) {
+        busy = null;
+        pg.pages++;
+        var nx = (res && res.next_href) || null, added = 0;
+        if (nx && nx === next) nx = null;   // a cursor that does not move would loop forever
+        next = nx;
+        if (!next) src.shift();
+        collection(res).forEach(function (x) {
+          var k = x.kind + ":" + x.id;
+          if (seen[k] || pg.items.length >= cap) return;
+          seen[k] = 1;
+          if (opts.lite && x.kind === "playlist") x.tracks = [];
+          pg.items.push(x);
+          added++;
+        });
+        if (added && sortNewest(pg.items)) pg.resorted = true;   // the server's order was not newest first
+        if (!src.length || pg.items.length >= cap || pg.pages >= MAX_PAGES) pg.done = true;
+        return added;
+      }, function (e) { busy = null; throw e; });
+      return busy;
+    };
+    pg.all = function (onPage) {
+      return pg.more().then(function () {
+        if (onPage) onPage(pg.items.length);
+        return pg.done ? pg.items : pg.all(onPage);
+      });
+    };
+    return pg;
+  }
+  function userPager(id, paths, opts) {
+    return pager(paths.map(function (p) { return ["/users/" + id + "/" + p, { limit: PAGE_LIMIT }]; }), opts);
+  }
+
+  // A linked profile's data, kept in memory for the session (never in localStorage) so the
+  // Profile screen comes back instantly. account(id, maxAge) starts over when the kept data
+  // is older than maxAge ms.
+  var accounts = {};
+  function account(id, maxAge) {
+    var a = accounts[id];
+    if (a && !(maxAge && Date.now() - a.ts > maxAge)) return a;
+    var info = null;
+    a = accounts[id] = {
+      id: id, ts: Date.now(),
+      // /users/{id}: the counts shown in row titles (asked again after a failure)
+      info: function () {
+        if (!info) info = get("/users/" + id).then(normUser, function (e) { info = null; throw e; });
+        return info;
+      },
+      likes: api.likesPager(id),
+      sets: api.setsPager(id),
+      likedSets: userPager(id, ["playlist_likes"], { lite: true }),
+      tracks: userPager(id, ["tracks"])
+    };
+    return a;
   }
 
   var api = SC.api = {
@@ -157,10 +257,16 @@
     user: function (id) { return get("/users/" + id).then(normUser); },
     userTracks: function (id, limit) { return get("/users/" + id + "/tracks", { limit: limit || 30 }).then(page); },
     userTopTracks: function (id, limit) { return get("/users/" + id + "/toptracks", { limit: limit || 20 }).then(page); },
-    userLikes: function (id, limit) { return get("/users/" + id + "/likes", { limit: limit || 40 }).then(page); },
+    // Liked tracks, newest like first (one page; likesPager reads them all).
+    userLikes: function (id, limit) { return get("/users/" + id + "/track_likes", { limit: limit || 40 }).then(page); },
     userPlaylists: function (id, limit) { return get("/users/" + id + "/playlists_without_albums", { limit: limit || 20 }).then(page); },
     userAlbums: function (id, limit) { return get("/users/" + id + "/albums", { limit: limit || 20 }).then(page); },
-    more: function (nextHref) { return get(nextHref).then(page); },
+    pager: pager,
+    likesPager: function (id) { return userPager(id, ["track_likes"]); },
+    // Created playlists and albums as one list, newest change first; read whole before it is shown.
+    setsPager: function (id) { return userPager(id, ["playlists_without_albums", "albums"], { lite: true, cap: 500 }); },
+    account: account,
+    forgetAccount: function (id) { delete accounts[id]; },
 
     playlist: function (pl) {
       if (pl.system) return get("/system-playlists/" + encodeURIComponent(pl.id)).then(normPlaylist);

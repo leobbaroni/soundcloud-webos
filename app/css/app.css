@@ -153,6 +153,17 @@ body.immersive #screens { left: 0; bottom: 0; }
   background: rgba(10, 10, 12, 0.78); color: var(--text); font-size: 18px; font-weight: 500;
   letter-spacing: 0.04em;
 }
+.card.unavailable .card-img { opacity: 0.42; }
+/* "See all" at both ends of a profile row, and the placeholder while a page loads */
+.more-face {
+  display: flex; align-items: center; justify-content: center; width: 264px; height: 264px;
+  border-radius: 10px; background: var(--surface-2); color: var(--text-2); font-size: 84px;
+}
+.card.focused .more-face { color: var(--text); }
+.card-loading .card-art { display: flex; align-items: center; justify-content: center; }
+.card-loading .spin { margin-right: 0; }
+/* playlists on a "See all" screen, five to a line */
+.cgrid-line { display: flex; align-items: flex-start; padding: 22px var(--gutter) 26px; }
 .card-user { width: 232px; text-align: center; }
 .card-user .card-art { width: 232px; height: 232px; }
 .card-user .card-img { width: 232px; height: 232px; border-radius: 116px; }

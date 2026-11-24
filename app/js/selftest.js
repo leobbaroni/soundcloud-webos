@@ -232,6 +232,37 @@
         });
       });
     }],
+    // Every like of the first linked profile (or the test account z.arc_), read through the
+    // app's pager: about 3 requests per 400 likes, plus the account and its playlists. The
+    // server leaves out tracks that were removed or made private, so a few may be missing
+    // against likes_count; more than TOL missing, or any like out of date order, fails.
+    ["profile-full", function () {
+      var pr = SC.profiles.list()[0], id = pr ? pr.id : 999762904;
+      var likes = SC.api.likesPager(id), sets = SC.api.setsPager(id);
+      return Promise.all([SC.api.user(id), likes.all(), sets.all()]).then(function (r) {
+        var u = r[0], items = likes.items, desc = true, seen = {}, dups = 0, undated = 0;
+        for (var i = 0; i < items.length; i++) {
+          if (seen[items[i].id]) dups++;
+          seen[items[i].id] = 1;
+          if (!items[i].at) undated++;
+          else if (i > 0 && items[i - 1].at && items[i].at > items[i - 1].at) desc = false;
+          else if (i > 0 && !items[i - 1].at) desc = false;   // undated ones must come last
+        }
+        var total = u.likesCount || 0, missing = total - items.length, tol = Math.max(3, Math.ceil(total * 0.1));
+        var unplayable = items.filter(function (t) { return t.tc && !t.playable; }).length;
+        var line = "likes=" + items.length + "/" + total + " playlists=" + sets.items.length + "/" + u.playlistCount +
+          " desc=" + desc + " pages=" + likes.pages;
+        var extra = "missing=" + missing + " (removed or private; tolerance " + tol + ") dups=" + dups + " undated=" + undated +
+          " serverOrder=" + (likes.resorted ? "re-sorted" : "newest-first") +
+          " unplayable=" + unplayable + " newest=" + (items[0] ? new Date(items[0].at).toISOString() : "-") +
+          " oldest=" + (items.length ? new Date(items[items.length - 1].at).toISOString() : "-");
+        if (!desc || dups || missing > tol) {
+          log("PROFILE-FULL FAIL " + line, extra);
+          throw new Error(!desc ? "likes out of date order" : dups ? dups + " duplicate likes" : missing + " likes missing");
+        }
+        log("PROFILE-FULL OK " + line, extra);
+      });
+    }],
     ["back-home", function () {
       router.root("home");
       key(461);
